@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102010819';
+  window.YOBS_VERSION = '20261102034223';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -405,6 +405,11 @@
 
   // ---- 音声(自動再生はミュート必須なので、タップ時に音を出す) ----
   let soundOn = store.get(KEY_SOUND) === 'on'; // 初期状態は音なし。🔊や音量スライダーで音ありに
+
+  // iPhone(iOS 17以降のSafari): このページの音を「他のアプリと混ぜる」設定にして、
+  // REALITY の音を止めないようにする(マナーモード中はこのページの音は出ない)
+  try { if (navigator.audioSession) navigator.audioSession.type = 'ambient'; } catch {}
+  const canMix = !!navigator.audioSession;
   function drawSound() { $('sound').textContent = soundOn ? '🔊 音あり' : '🔇 音なし'; }
   let userTapped = false;
   function applySound() { userTapped = true; video.muted = !soundOn; drawSound(); }
@@ -699,6 +704,13 @@
     soundOn = !soundOn;
     store.set(KEY_SOUND, soundOn ? 'on' : 'off');
     applySound();
+    if (soundOn) {
+      say(canMix
+        ? 'REALITYの音と一緒に流れます(マナーモード中は音が出ません)。REALITYの音が消える時は🔇にしてください'
+        : 'スマホによってはREALITYの音が止まります。REALITYの音が消える時は🔇にしてください');
+    } else {
+      say('');
+    }
     video.play().catch(() => {});
   });
 
