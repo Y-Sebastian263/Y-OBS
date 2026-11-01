@@ -242,7 +242,11 @@ chmod 600 "$CONF_DIR/info.txt"
 echo
 echo "================ セットアップ完了 ================"
 echo "サーバーのアドレス : ${IP}"
-echo "OBS送信パスワード  : ${PASS}"
+if [ "${YOBS_HIDE_PASS:-}" = "1" ]; then
+  echo "OBS送信パスワード  : (表示しません。変わっていません)"
+else
+  echo "OBS送信パスワード  : ${PASS}"
+fi
 echo "(あとで見る時: sudo cat ${CONF_DIR}/info.txt)"
 if [ ! -s /var/lib/y-obs/admin_pin.json ]; then
   echo "管理画面の暗証番号がまだありません → sudo y-obs-admin pin で設定してください"
