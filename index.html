@@ -41,6 +41,7 @@
   .msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--sub); text-align: center; }
   .hint { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 8px 0 12px; }
   .hint b { color: var(--text); }
+  .hint { text-align: center; }
 </style>
 </head>
 <body>
@@ -52,7 +53,7 @@
 
   <div class="screen">
     <video id="video" muted playsinline webkit-playsinline autoplay></video>
-    <div id="overlay" class="overlay">接続先が未設定です。<br>PCのOBSに表示されたQRコードから開いてください。</div>
+    <div id="overlay" class="overlay">準備中です。</div>
   </div>
 
   <div class="btns">
@@ -64,6 +65,7 @@
     </div>
   </div>
   <div id="msg" class="msg"></div>
+  <p class="hint">iPhoneは<b>Safari</b>、Androidは<b>Chrome</b>で開いてください(アプリ内のブラウザではミニプレイヤーが使えません)。</p>
 
 </div>
 
@@ -74,7 +76,7 @@
   const CONFIG = window.YOBS_CONFIG || {};
   const REALITY_PACKAGE = CONFIG.realityPackage || 'net.wrightflyer.le.reality';
   const RETURN_URL = CONFIG.returnUrl || 'https://reality.app/';
-  const KEY_SRC = 'yobs.src', KEY_RTC = 'yobs.rtc', KEY_SOUND = 'yobs.sound';
+  const KEY_SOUND = 'yobs.sound';
 
   const $ = (id) => document.getElementById(id);
   const video = $('video'), overlay = $('overlay'), msg = $('msg');
@@ -88,16 +90,16 @@
     set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} },
   };
 
+  // 接続先は config.js で固定(視聴者はページを開くだけ)。
+  // テスト用に ?src=...&rtc=... での上書きもできる(アドレスバーからは消す)
   const params = new URLSearchParams(location.search);
+  let src = CONFIG.hlsUrl || '';
+  let rtcUrl = CONFIG.rtcUrl || '';
   if (params.get('src')) {
-    store.set(KEY_SRC, params.get('src').trim());
-    store.set(KEY_RTC, (params.get('rtc') || '').trim());
-    // 接続先をアドレスバーに残さない
+    src = params.get('src').trim();
+    rtcUrl = (params.get('rtc') || '').trim();
     history.replaceState(null, '', location.pathname);
   }
-
-  let src = store.get(KEY_SRC);
-  let rtcUrl = store.get(KEY_RTC);
 
   // ---- 音声(自動再生はミュート必須なので、タップ時に音を出す) ----
   let soundOn = store.get(KEY_SOUND) !== 'off';
@@ -136,7 +138,7 @@
   function scheduleRetry() {
     clearTimeout(retryTimer);
     setStatus('wait', '配信待ち');
-    showOverlay('配信を待っています…<br>OBSで配信を開始すると自動で映ります。');
+    showOverlay('配信はまだ始まっていません。<br>始まると自動で映ります。');
     retryTimer = setTimeout(startPlayer, 3000);
   }
 
@@ -148,7 +150,7 @@
     stopPlayer();
     if (!src) {
       setStatus('', '未設定');
-      showOverlay('接続先が未設定です。<br>PCのOBSに表示されたQRコードから開いてください。');
+      showOverlay('準備中です。');
       return;
     }
     video.muted = !userTapped || !soundOn; // 自動再生のため最初はミュート
