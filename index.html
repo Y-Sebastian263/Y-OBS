@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261101233850';
+  window.YOBS_VERSION = '20261101235718';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -91,9 +91,53 @@
   .hint { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 8px 0 12px; }
   .hint b { color: var(--text); }
   .hint { text-align: center; }
+  h1.tap { cursor: default; user-select: none; -webkit-user-select: none; }
+  .cform { display: grid; gap: 8px; padding: 12px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
+  .cform input, .cform textarea, .modal input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit; resize: vertical; }
+  .primary.small { font-size: 16px; padding: 14px; }
+  .secondary.small { font-size: 13px; padding: 8px 12px; border-radius: 10px; }
+  .cmsg { margin: 0; min-height: 16px; font-size: 12px; color: var(--sub); text-align: center; }
+  .modal { position: fixed; inset: 0; z-index: 20; background: rgba(10,8,16,.85); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .modal-box { width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; display: grid; gap: 12px; }
+  .modal-box h2 { margin: 0; font-size: 18px; text-align: center; }
+  .modal input { font-size: 22px; text-align: center; letter-spacing: .3em; }
+  .loginmsg { margin: 0; min-height: 18px; font-size: 13px; color: var(--ng); text-align: center; }
+  .ban { position: fixed; inset: 0; z-index: 30; background: #0b0910; display: flex; align-items: center; justify-content: center; text-align: center; }
+  .ban-icon { font-size: 64px; }
+  .ban-main { font-size: 20px; font-weight: 800; }
+  /* 管理画面: 左に通常画面、右に管理画面 */
+  body.admin-on .layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 18px; max-width: 1400px; margin: 0 auto; }
+  body.admin-on .wrap { margin: 0; width: 100%; }
+  @media (max-width: 820px) { body.admin-on .layout { grid-template-columns: 1fr; } }
+  .admin { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 14px;
+    height: calc(100vh - 40px); position: sticky; top: 14px; min-height: 480px; }
+  @media (max-width: 820px) { .admin { height: auto; position: static; } }
+  .admin-head { display: flex; justify-content: space-between; align-items: center; }
+  .admin-head h2 { margin: 0; font-size: 17px; }
+  .admin-sec h3 { margin: 0 0 8px; font-size: 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .admin-sec.grow { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+  .badge { background: var(--accent2); border-radius: 99px; padding: 1px 8px; font-size: 12px; }
+  .muted { color: var(--sub); font-weight: 400; }
+  .note { font-size: 11px; line-height: 1.5; margin: 0 0 8px; }
+  .tablewrap { overflow: auto; max-height: 34vh; border: 1px solid var(--line); border-radius: 10px; }
+  table.clients { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.clients th, table.clients td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  table.clients th { position: sticky; top: 0; background: #2a2338; font-weight: 600; }
+  table.clients td.mono, .c-meta .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .comments { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-height: 200px; }
+  .c-item { padding: 8px; border-bottom: 1px solid var(--line); }
+  .c-item.new { animation: flash 1.5s ease-out; }
+  @keyframes flash { from { background: rgba(255,111,174,.25); } to { background: transparent; } }
+  .c-head { display: flex; gap: 8px; align-items: baseline; }
+  .c-name { font-weight: 700; color: var(--accent); }
+  .c-time { font-size: 11px; color: var(--sub); }
+  .c-text { margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
+  .c-meta { font-size: 11px; color: var(--sub); }
 </style>
 </head>
 <body>
+<div class="layout">
 <div class="wrap">
   <header>
     <h1>Y-OBS</h1>
@@ -117,6 +161,12 @@
       <button id="sound" class="secondary">🔊 音あり</button>
       <button id="reload" class="secondary">🔄 再接続</button>
     </div>
+    <form id="commentForm" class="cform" autocomplete="off">
+      <input id="cName" class="cname" maxlength="30" placeholder="名前">
+      <textarea id="cText" rows="2" maxlength="300" placeholder="コメントを入力"></textarea>
+      <button id="cSend" type="submit" class="primary small">コメント送信</button>
+      <p id="cMsg" class="cmsg"></p>
+    </form>
     <div id="volRow" class="volrow">
       <span class="vollabel">音量</span>
       <input id="volume" type="range" min="0" max="100" step="5" value="80" aria-label="音量">
@@ -133,6 +183,48 @@
       <button id="openAndroid" class="os">Android<br><small>Chromeで開く</small></button>
     </div>
     <p class="pcnote">💻 PCでも閲覧できます</p>
+  </div>
+</div>
+
+<aside id="admin" class="admin" hidden>
+  <div class="admin-head">
+    <h2>管理画面</h2>
+    <button id="adminLogout" class="secondary small">ログアウト</button>
+  </div>
+  <section class="admin-sec">
+    <h3>アクセス中の端末 <span id="clientCount" class="badge">0</span>
+      <small id="countDetail" class="muted"></small></h3>
+    <p class="muted note">※ブラウザからはMACアドレス・端末名を取得できないため、端末ID(ブラウザごとの固有ID)・端末の種類・IPアドレスで表示しています。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
+    <div class="tablewrap">
+      <table class="clients">
+        <thead><tr><th>名前</th><th>端末</th><th>端末ID</th><th>IP</th><th>状態</th></tr></thead>
+        <tbody id="clientRows"></tbody>
+      </table>
+    </div>
+  </section>
+  <section class="admin-sec grow">
+    <h3>コメント <span id="commentCount" class="badge">0</span></h3>
+    <div id="commentList" class="comments"></div>
+  </section>
+</aside>
+</div>
+
+<div id="loginModal" class="modal" hidden>
+  <div class="modal-box">
+    <h2>管理ログイン</h2>
+    <input id="pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" placeholder="暗証番号(数字)">
+    <p id="loginMsg" class="loginmsg"></p>
+    <div class="row2">
+      <button id="loginCancel" class="secondary">キャンセル</button>
+      <button id="loginGo" class="primary small">ログイン</button>
+    </div>
+  </div>
+</div>
+
+<div id="banScreen" class="ban" hidden>
+  <div>
+    <div class="ban-icon">⛔</div>
+    <p class="ban-main">アクセスが禁止されています</p>
   </div>
 </div>
 
@@ -533,6 +625,194 @@
   }
 
   startPlayer();
+})();
+</script>
+<script>
+// ===== コメント・管理画面 =====
+(() => {
+  const CONFIG = window.YOBS_CONFIG || {};
+  const API = CONFIG.apiUrl || '';
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+    set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} },
+  };
+  if (!API) return;
+
+  // ---- 端末ID(ブラウザごとの固有ID。MACアドレスの代わり)----
+  let device = store.get('yobs.device');
+  if (!device) {
+    device = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random().toString(16).slice(2)).replace(/-/g, '');
+    store.set('yobs.device', device);
+  }
+  $('cName').value = store.get('yobs.name');
+
+  async function post(path, body, token) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = 'Bearer ' + token;
+    const r = await fetch(API + path, { method: 'POST', headers, body: JSON.stringify(body) });
+    let d = {};
+    try { d = await r.json(); } catch {}
+    return { ok: r.ok, status: r.status, data: d };
+  }
+
+  // ---- 禁止された端末 ----
+  function showBan() {
+    $('banScreen').hidden = false;
+    const v = $('video');
+    if (v) { try { v.pause(); } catch {} v.remove(); }
+  }
+
+  // ---- 挨拶(アクセス中の端末として表示するため)----
+  async function hello() {
+    try {
+      const v = $('video');
+      const r = await post('/hello', { device, name: store.get('yobs.name'), viewing: !!(v && !v.paused) });
+      if (r.data && r.data.banned) showBan();
+    } catch {}
+  }
+  hello();
+  setInterval(() => { if (document.visibilityState === 'visible') hello(); }, 30000);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') hello(); });
+
+  // ---- コメント送信 ----
+  $('commentForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = $('cName').value.trim();
+    const text = $('cText').value.trim();
+    if (!text) { $('cMsg').textContent = 'コメントを入力してください'; return; }
+    if (name) store.set('yobs.name', name);   // 名前はこのブラウザに保存
+    $('cSend').disabled = true;
+    try {
+      const r = await post('/comment', { device, name, text });
+      if (r.ok) { $('cText').value = ''; $('cMsg').textContent = '送信しました'; }
+      else { $('cMsg').textContent = (r.data && r.data.error) || '送信できませんでした'; if (r.status === 403) showBan(); }
+    } catch { $('cMsg').textContent = '送信できませんでした'; }
+    $('cSend').disabled = false;
+    setTimeout(() => { $('cMsg').textContent = ''; }, 3000);
+  });
+
+  // ---- タイトルを5回連続タップでログイン画面 ----
+  const title = document.querySelector('header h1');
+  title.classList.add('tap');
+  let taps = 0, tapTimer = null;
+  title.addEventListener('click', () => {
+    taps++;
+    clearTimeout(tapTimer);
+    tapTimer = setTimeout(() => { taps = 0; }, 1500);
+    if (taps >= 5) { taps = 0; openLogin(); }
+  });
+
+  function openLogin() {
+    if (token) return;
+    $('loginMsg').textContent = '';
+    $('pin').value = '';
+    $('loginModal').hidden = false;
+    setTimeout(() => $('pin').focus(), 50);
+  }
+  $('loginCancel').addEventListener('click', () => { $('loginModal').hidden = true; });
+  $('pin').addEventListener('input', () => { $('pin').value = $('pin').value.replace(/\D/g, ''); });
+  $('pin').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+  $('loginGo').addEventListener('click', login);
+
+  let token = '';
+  try { token = sessionStorage.getItem('yobs.token') || ''; } catch {}
+
+  async function login() {
+    const pin = $('pin').value;
+    if (!pin) return;
+    $('loginGo').disabled = true;
+    try {
+      const r = await post('/login', { device, pin });
+      if (r.ok && r.data.token) {
+        token = r.data.token;
+        try { sessionStorage.setItem('yobs.token', token); } catch {}
+        $('loginModal').hidden = true;
+        startAdmin();
+      } else {
+        $('loginMsg').textContent = (r.data && r.data.error) || 'ログインできませんでした';
+        $('pin').value = '';
+        if (r.status === 403) { $('loginModal').hidden = true; showBan(); }
+      }
+    } catch { $('loginMsg').textContent = 'サーバーにつながりません'; }
+    $('loginGo').disabled = false;
+  }
+
+  // ---- 管理画面 ----
+  let adminTimer = null, lastTopTs = 0;
+  function startAdmin() {
+    document.body.classList.add('admin-on');
+    $('admin').hidden = false;
+    refresh();
+    clearInterval(adminTimer);
+    adminTimer = setInterval(refresh, 2000);
+  }
+  function stopAdmin() {
+    clearInterval(adminTimer);
+    token = '';
+    try { sessionStorage.removeItem('yobs.token'); } catch {}
+    document.body.classList.remove('admin-on');
+    $('admin').hidden = true;
+  }
+  $('adminLogout').addEventListener('click', async () => {
+    try { await post('/admin/logout', {}, token); } catch {}
+    stopAdmin();
+  });
+
+  const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const fmtDate = (ts) => new Date(ts * 1000).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+
+  async function refresh() {
+    if (!token) return;
+    let d;
+    try {
+      const r = await fetch(API + '/admin/state', { headers: { Authorization: 'Bearer ' + token }, cache: 'no-store' });
+      if (r.status === 401) { stopAdmin(); return; }
+      d = await r.json();
+    } catch { return; }
+
+    // 端末一覧
+    $('clientCount').textContent = d.clients.length;
+    $('countDetail').textContent = d.count ? `映像の視聴: ${d.count.viewers}人` : '';
+    const rows = $('clientRows');
+    rows.textContent = '';
+    for (const c of d.clients) {
+      const tr = el('tr');
+      tr.append(
+        el('td', '', c.name || '—'),
+        el('td', '', c.label),
+        el('td', 'mono', c.device.slice(0, 8)),
+        el('td', 'mono', c.ip),
+        el('td', '', c.ago <= 35 ? (c.viewing ? '視聴中' : '表示中') : `${c.ago}秒前`),
+      );
+      tr.title = c.ua;
+      rows.append(tr);
+    }
+
+    // コメント(新しい順)
+    $('commentCount').textContent = d.comments.length;
+    const list = $('commentList');
+    const topTs = d.comments.length ? d.comments[0].ts : 0;
+    if (topTs !== lastTopTs) {
+      const isFirst = lastTopTs === 0;
+      list.textContent = '';
+      for (const c of d.comments) {
+        const item = el('div', 'c-item' + (!isFirst && c.ts > lastTopTs ? ' new' : ''));
+        const head = el('div', 'c-head');
+        head.append(el('span', 'c-name', c.name), el('span', 'c-time', fmtDate(c.ts)));
+        const meta = el('div', 'c-meta');
+        meta.append(document.createTextNode(c.label + ' / ID '), el('span', 'mono', c.device.slice(0, 8)),
+          document.createTextNode(' / IP '), el('span', 'mono', c.ip));
+        item.append(head, el('div', 'c-text', c.text), meta);
+        list.append(item);
+      }
+      lastTopTs = topTs;
+      list.scrollTo({ top: 0, behavior: isFirst ? 'auto' : 'smooth' });  // 新しいコメントへ自動スクロール
+    }
+  }
+
+  if (token) startAdmin();
 })();
 </script>
 </body>

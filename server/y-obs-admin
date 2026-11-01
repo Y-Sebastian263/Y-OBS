@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Y-OBS 管理コマンド(サーバー上で sudo で実行)
+
+  sudo y-obs-admin pin          管理画面の暗証番号を設定(数字のみ・画面に表示されない)
+  sudo y-obs-admin bans         禁止中の端末・IPの一覧
+  sudo y-obs-admin unban <IPまたは端末ID>   禁止を解除
+  sudo y-obs-admin unban-all    すべての禁止を解除
+"""
+import getpass
+import hashlib
+import json
+import os
+import pwd
+import secrets
+import subprocess
+import sys
+import time
+
+DATA = "/var/lib/y-obs"
+
+
+def save(name, data):
+    p = os.path.join(DATA, name)
+    with open(p + ".tmp", "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=1)
+    os.replace(p + ".tmp", p)
+    u = pwd.getpwnam("caddy")
+    os.chown(p, u.pw_uid, u.pw_gid)
+    os.chmod(p, 0o600)
+
+
+def load(name, default):
+    try:
+        with open(os.path.join(DATA, name), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def restart():
+    subprocess.run(["systemctl", "restart", "y-obs-api"], check=False)
+
+
+def cmd_pin():
+    pin = getpass.getpass("新しい暗証番号(数字4桁以上・表示されません): ").strip()
+    if not pin.isdigit() or len(pin) < 4:
+        sys.exit("数字だけで4桁以上にしてください")
+    if getpass.getpass("もう一度入力: ").strip() != pin:
+        sys.exit("一致しませんでした")
+    salt = secrets.token_bytes(16)
+    it = 300_000
+    h = hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, it).hex()
+    save("admin_pin.json", {"salt": salt.hex(), "iter": it, "hash": h})
+    print("暗証番号を設定しました")
+
+
+def cmd_bans():
+    b = load("bans.json", {"devices": {}, "ips": {}})
+    if not b["devices"] and not b["ips"]:
+        print("禁止中の端末はありません")
+        return
+    for kind, items in (("IP", b["ips"]), ("端末ID", b["devices"])):
+        for key, r in items.items():
+            t = time.strftime("%Y-%m-%d %H:%M", time.localtime(r.get("ts", 0)))
+            print(f"[{kind}] {key}  {t}  {r.get('label', '')}  {r.get('reason', '')}")
+
+
+def cmd_unban(key):
+    b = load("bans.json", {"devices": {}, "ips": {}})
+    hit = b["devices"].pop(key, None) or b["ips"].pop(key, None)
+    if not hit:
+        sys.exit("見つかりませんでした: " + key)
+    # 同じ出来事で禁止された相方(IP⇔端末ID)も解除
+    b["devices"].pop(hit.get("device", ""), None)
+    b["ips"].pop(hit.get("ip", ""), None)
+    save("bans.json", b)
+    restart()
+    print("解除しました")
+
+
+def cmd_unban_all():
+    save("bans.json", {"devices": {}, "ips": {}})
+    restart()
+    print("すべての禁止を解除しました")
+
+
+if __name__ == "__main__":
+    if os.geteuid() != 0:
+        sys.exit("sudo を付けて実行してください")
+    os.makedirs(DATA, exist_ok=True)
+    a = sys.argv[1:]
+    if a[:1] == ["pin"]:
+        cmd_pin()
+    elif a[:1] == ["bans"]:
+        cmd_bans()
+    elif a[:1] == ["unban"] and len(a) == 2:
+        cmd_unban(a[1])
+    elif a[:1] == ["unban-all"]:
+        cmd_unban_all()
+    else:
+        print(__doc__)

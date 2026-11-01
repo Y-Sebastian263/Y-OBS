@@ -167,6 +167,9 @@ ${HOST} {
 	handle /count {
 		reverse_proxy 127.0.0.1:8897
 	}
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8897
+	}
 	handle {
 		respond "Y-OBS server OK" 200
 	}
@@ -180,20 +183,27 @@ if ! caddy validate --config "$CADDYFILE" --adapter caddyfile >/tmp/y-obs-caddy-
   exit 1
 fi
 
-echo "==> 同時視聴人数カウンター"
-mkdir -p /var/log/caddy /usr/local/lib/y-obs
-chown caddy:caddy /var/log/caddy
-curl -fsSL "https://raw.githubusercontent.com/Y-Sebastian263/Y-OBS/${YOBS_REF:-main}/server/viewer-count.py" \
-  -o /usr/local/lib/y-obs/viewer-count.py
-chmod 755 /usr/local/lib/y-obs/viewer-count.py
-cat > /etc/systemd/system/y-obs-count.service <<EOF
+echo "==> Y-OBS API(視聴人数・コメント・管理画面)"
+RAW="https://raw.githubusercontent.com/Y-Sebastian263/Y-OBS/${YOBS_REF:-main}/server"
+mkdir -p /var/log/caddy /usr/local/lib/y-obs /var/lib/y-obs
+chown caddy:caddy /var/log/caddy /var/lib/y-obs
+chmod 700 /var/lib/y-obs
+curl -fsSL "$RAW/yobs-api.py" -o /usr/local/lib/y-obs/yobs-api.py
+curl -fsSL "$RAW/y-obs-admin" -o /usr/local/sbin/y-obs-admin
+chmod 755 /usr/local/lib/y-obs/yobs-api.py /usr/local/sbin/y-obs-admin
+# 旧版の人数カウンターは API に統合したので止める
+if systemctl list-unit-files | grep -q '^y-obs-count.service'; then
+  systemctl disable --now y-obs-count >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/y-obs-count.service /usr/local/lib/y-obs/viewer-count.py
+fi
+cat > /etc/systemd/system/y-obs-api.service <<EOF
 [Unit]
-Description=Y-OBS viewer counter
+Description=Y-OBS API (viewers, comments, admin)
 After=network-online.target
 
 [Service]
 User=caddy
-ExecStart=/usr/bin/python3 /usr/local/lib/y-obs/viewer-count.py
+ExecStart=/usr/bin/python3 /usr/local/lib/y-obs/yobs-api.py
 Restart=always
 RestartSec=3
 
@@ -213,8 +223,8 @@ echo "==> 起動"
 systemctl daemon-reload
 systemctl enable --now y-obs-mediamtx >/dev/null
 systemctl restart y-obs-mediamtx
-systemctl enable --now y-obs-count >/dev/null
-systemctl restart y-obs-count
+systemctl enable --now y-obs-api >/dev/null
+systemctl restart y-obs-api
 systemctl enable caddy >/dev/null
 if systemctl is-active --quiet caddy; then systemctl reload caddy; else systemctl start caddy; fi
 
@@ -225,6 +235,7 @@ OBS 送信パスワード: ${PASS}
 視聴 HLS       : https://hls.${HOST}/live/index.m3u8
 視聴 WebRTC    : https://rtc.${HOST}/live/whep
 視聴人数       : https://${HOST}/count
+管理画面の暗証番号: sudo y-obs-admin pin で設定
 EOF
 chmod 600 "$CONF_DIR/info.txt"
 
@@ -233,5 +244,8 @@ echo "================ セットアップ完了 ================"
 echo "サーバーのアドレス : ${IP}"
 echo "OBS送信パスワード  : ${PASS}"
 echo "(あとで見る時: sudo cat ${CONF_DIR}/info.txt)"
+if [ ! -s /var/lib/y-obs/admin_pin.json ]; then
+  echo "管理画面の暗証番号がまだありません → sudo y-obs-admin pin で設定してください"
+fi
 echo "=================================================="
 echo "※ パスワードは他人に見せないでください。"

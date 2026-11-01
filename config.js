@@ -5,6 +5,8 @@ window.YOBS_CONFIG = {
   rtcUrl: 'https://rtc.153-127-64-17.sslip.io/live/whep',
   // 同時視聴人数
   countUrl: 'https://153-127-64-17.sslip.io/count',
+  // コメント・管理画面のAPI
+  apiUrl: 'https://153-127-64-17.sslip.io/api',
   // 「REALITYへ戻る」で開くURL
   returnUrl: 'https://reality.app/',
   // Android 版 REALITY のパッケージ名
