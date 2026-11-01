@@ -72,9 +72,21 @@ local function run_hidden(bat)
 end
 
 local function kill_tools()
-  os.execute('taskkill /F /IM mediamtx.exe >nul 2>&1')
-  os.execute('taskkill /F /IM cloudflared.exe >nul 2>&1')
+  os.execute('taskkill /F /IM mediamtx.exe /IM mediamtx.exe.exe /IM cloudflared.exe /IM cloudflared.exe.exe ' ..
+    '/IM cloudflared-windows-amd64.exe >nul 2>&1')
 end
+
+-- 名前の揺れ(.exe.exe や ダウンロード時の名前)も探す
+local function find_exe(dir, names)
+  for _, n in ipairs(names) do
+    if file_exists(dir .. "\\" .. n) then return n end
+  end
+  return nil
+end
+
+local MEDIAMTX_NAMES = { "mediamtx.exe", "mediamtx.exe.exe" }
+local CLOUDFLARED_NAMES = { "cloudflared.exe", "cloudflared.exe.exe",
+  "cloudflared-windows-amd64.exe", "cloudflared-windows-amd64.exe.exe" }
 
 local function tools_ok()
   local dir = winpath(cfg.tools_dir)
@@ -82,14 +94,16 @@ local function tools_ok()
     warn("ツールフォルダが未設定です")
     return nil
   end
+  local mtx = find_exe(dir, MEDIAMTX_NAMES)
+  local cfd = find_exe(dir, CLOUDFLARED_NAMES)
   local missing = {}
-  if not file_exists(dir .. "\\mediamtx.exe") then table.insert(missing, "mediamtx.exe") end
-  if not file_exists(dir .. "\\cloudflared.exe") then table.insert(missing, "cloudflared.exe") end
+  if not mtx then table.insert(missing, "mediamtx.exe") end
+  if not cfd then table.insert(missing, "cloudflared.exe") end
   if #missing > 0 then
     warn("ツールフォルダに " .. table.concat(missing, " と ") .. " がありません: " .. dir)
     return nil
   end
-  return dir
+  return dir, mtx, cfd
 end
 
 local function make_viewer_url(tunnel)
@@ -191,16 +205,16 @@ local function on_setup(props, prop)
 end
 
 local function start_servers()
-  local dir = tools_ok()
+  local dir, mtx, cfd = tools_ok()
   if not dir then return false end
 
   kill_tools()
   os.remove(dir .. "\\tunnel.log")
 
   write_file(dir .. "\\y-obs-mediamtx.bat",
-    "@echo off\r\ncd /d \"%~dp0\"\r\nmediamtx.exe > mediamtx.log 2>&1\r\n")
+    "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. mtx .. "\" > mediamtx.log 2>&1\r\n")
   write_file(dir .. "\\y-obs-tunnel.bat",
-    "@echo off\r\ncd /d \"%~dp0\"\r\ncloudflared.exe tunnel --no-autoupdate --url http://127.0.0.1:" ..
+    "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. cfd .. "\" tunnel --no-autoupdate --url http://127.0.0.1:" ..
     HLS_PORT .. " > tunnel.log 2>&1\r\n")
 
   run_hidden(dir .. "\\y-obs-mediamtx.bat")
