@@ -11,6 +11,7 @@
     --accent: #ff6fae; --accent2: #7c5cff; --ok: #3ddc97; --warn: #ffc857; --ng: #ff6b6b;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   html, body { margin: 0; background: var(--bg); color: var(--text);
     font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
   body { padding: max(14px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom)); }
@@ -38,6 +39,12 @@
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row2 button { padding: 14px 6px; font-size: 15px; }
   .wide { width: 100%; }
+  .volrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px;
+    background: var(--panel); border: 1px solid var(--line); }
+  .vollabel { font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .voltext { font-size: 13px; color: var(--sub); width: 3.2em; text-align: right; }
+  .volrow input[type=range] { flex: 1; accent-color: var(--accent); height: 28px; }
+  .volios { margin: 0; font-size: 12px; color: var(--sub); text-align: center; }
   .openbox { margin-top: 18px; padding: 14px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); }
   .openbox.alert { border-color: var(--warn); box-shadow: 0 0 0 2px rgba(255,200,87,.25); }
   .opennote { margin: 0 0 10px; font-size: 13px; color: var(--sub); text-align: center; line-height: 1.5; }
@@ -71,6 +78,12 @@
       <button id="pipOnly" class="secondary">ミニプレイヤーだけ</button>
       <button id="sound" class="secondary">🔊 音あり</button>
     </div>
+    <div id="volRow" class="volrow">
+      <span class="vollabel">音量</span>
+      <input id="volume" type="range" min="0" max="100" step="5" value="80" aria-label="音量">
+      <span id="volText" class="voltext">80%</span>
+    </div>
+    <p id="volIos" class="volios" hidden>iPhoneは本体の音量ボタンで調整してください</p>
     <button id="reload" class="secondary wide">🔄 再接続</button>
   </div>
   <div id="msg" class="msg"></div>
@@ -121,6 +134,32 @@
   function drawSound() { $('sound').textContent = soundOn ? '🔊 音あり' : '🔇 音なし'; }
   let userTapped = false;
   function applySound() { userTapped = true; video.muted = !soundOn; drawSound(); }
+
+  // ---- 音量(iPhone の Safari はページから音量を変えられないので本体ボタンで) ----
+  const KEY_VOL = 'yobs.vol';
+  let vol = parseInt(store.get(KEY_VOL) || '80', 10);
+  if (!(vol >= 0 && vol <= 100)) vol = 80;
+  function applyVolume() {
+    video.volume = vol / 100;
+    $('volume').value = vol;
+    $('volText').textContent = vol + '%';
+  }
+  if (isIOS) {
+    $('volRow').hidden = true;
+    $('volIos').hidden = false;
+  } else {
+    applyVolume();
+    $('volume').addEventListener('input', () => {
+      vol = parseInt($('volume').value, 10);
+      store.set(KEY_VOL, String(vol));
+      applyVolume();
+      // 音量を動かしたら音ありにする(0なら音なし)
+      soundOn = vol > 0;
+      store.set(KEY_SOUND, soundOn ? 'on' : 'off');
+      applySound();
+      video.play().catch(() => {});
+    });
+  }
   drawSound();
 
   // ---- 状態表示 ----
