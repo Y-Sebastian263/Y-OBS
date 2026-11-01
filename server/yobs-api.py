@@ -11,11 +11,15 @@ Caddy 経由で https://<host>/count と https://<host>/api/... に公開され�
   POST /api/admin/title        配信タイトルを設定(配信終了で自動リセット)
   POST /api/admin/mute         コメントのミュート {"device","on"}(ミュート中の端末のコメントは記録しない)
   POST /api/admin/logout
+  GET  /api/admin/visits?from=&to=[&device=]   訪問履歴(端末ごと・期間指定)
+  GET  /api/admin/streams                      配信の一覧
+  GET  /api/admin/stream?id=                   配信の詳細(1分ごとの視聴者数・コメント数)
 
 ブラウザからは MAC アドレスや端末名は取れないため、ページが端末ごとに作る
 「端末ID」と、接続元の IP アドレスで端末を見分ける。
 暗証番号を 1 時間に 3 回間違えると、その端末IDと IP アドレスを永久に禁止する。
 """
+import bisect
 import hashlib
 import hmac
 import json
@@ -42,7 +46,7 @@ TOKEN_TTL = 12 * 3600
 COMMENT_MAX = 300
 NAME_MAX = 30
 COMMENT_INTERVAL = 3        # 秒: 同じ端末の連投制限
-COMMENTS_KEEP = 2000
+COMMENTS_KEEP = 200000      # 履歴の集計に使うので多めに保持(画面には最新300件)
 
 lock = threading.Lock()
 clients = {}                # device -> {name, ip, ua, label, first, last, viewing}
@@ -101,6 +105,26 @@ def append_comment(c):
     del comments[:-COMMENTS_KEEP]
     with open(path("comments.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps(c, ensure_ascii=False) + "\n")
+    stream_comment(c["ts"])
+
+
+def load_jsonl(name):
+    out = []
+    try:
+        with open(path(name), encoding="utf-8") as f:
+            for line in f:
+                try:
+                    out.append(json.loads(line))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return out
+
+
+def append_jsonl(name, obj):
+    with open(path(name), "a", encoding="utf-8") as f:
+        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------- 端末の見分け
@@ -287,18 +311,183 @@ def count_snapshot():
     return data
 
 
-# ---------------------------------------------------------------- 配信の終了を見張る
+# ---------------------------------------------------------------- 訪問履歴
+# ページからの挨拶(30秒ごと)が VISIT_GAP 秒途切れたら「退室」とみなして 1 回の訪問を確定する。
+VISIT_GAP = 180
+visits = load_jsonl("visits.jsonl")                 # [{device, start, end}]
+visits_open = load_json("visits_open.json", {})     # ブラウザID -> {start, last}
+
+
+def visit_touch(device, now):
+    v = visits_open.get(device)
+    if v and now - v["last"] <= VISIT_GAP:
+        v["last"] = now
+        return
+    if v:
+        close_visit(device, v)
+    visits_open[device] = {"start": now, "last": now}
+
+
+def close_visit(device, v):
+    rec = {"device": device, "start": v["start"], "end": v["last"]}
+    visits.append(rec)
+    append_jsonl("visits.jsonl", rec)
+
+
+def close_stale_visits(now):
+    for dev, v in list(visits_open.items()):
+        if now - v["last"] > VISIT_GAP:
+            close_visit(dev, v)
+            del visits_open[dev]
+    save_json("visits_open.json", visits_open)
+
+
+def visits_report(t_from, t_to, only=None):
+    """期間内の訪問を端末(つながったブラウザのまとまり)ごとに集計する"""
+    now = time.time()
+    items = [dict(v, open=False) for v in visits]
+    items += [{"device": d, "start": v["start"], "end": v["last"], "open": True} for d, v in visits_open.items()]
+    groups = {}
+    for v in items:
+        if v["end"] < t_from or v["start"] >= t_to:
+            continue
+        root = find(v["device"])
+        if only and root != only:
+            continue
+        g = groups.setdefault(root, {"root": root, "key": root[:8], "visits": [], "total": 0, "comments": 0})
+        g["visits"].append(v)
+    # 端末の情報とコメント数(端末ごとのコメント時刻を一度だけ並べて数える)
+    by_dev = {}
+    for c in comments:
+        by_dev.setdefault(c.get("device"), []).append(c["ts"])
+    for root, g in groups.items():
+        members = [d for d in seen if find(d) == root] or [root]
+        names, labels = [], []
+        for d in members:
+            sv = seen.get(d, {})
+            for n in sv.get("names", []):
+                if n not in names:
+                    names.append(n)
+            if sv.get("label") and sv["label"] not in labels:
+                labels.append(sv["label"])
+        g["names"], g["labels"] = names, labels
+        mset = set(members)
+        g["visits"].sort(key=lambda v: v["start"], reverse=True)
+        for v in g["visits"]:
+            v["duration"] = int(v["end"] - v["start"])
+            v["comments"] = sum(bisect.bisect_right(by_dev.get(d, []), v["end"] + 60) -
+                                bisect.bisect_left(by_dev.get(d, []), v["start"] - 5) for d in mset)
+            v["browser"] = seen.get(v["device"], {}).get("label", "").split(" / ")[-1]
+            g["total"] += v["duration"]
+            g["comments"] += v["comments"]
+        g["count"] = len(g["visits"])
+        g["last"] = max(v["end"] for v in g["visits"])
+        g["online"] = any(v["open"] and now - v["end"] <= VISIT_GAP for v in g["visits"])
+    out = sorted(groups.values(), key=lambda g: g["last"], reverse=True)
+    return out
+
+
+# ---------------------------------------------------------------- 配信の記録
+# 配信開始〜終了を 1 回の配信として記録。終了から STREAM_MERGE 秒以内につけ直したら同じ配信の続き。
+# 1 分ごとに視聴者数とコメント数を記録して、盛り上がりのヒートマップに使う。
+STREAM_MERGE = 3600
+streams = load_json("streams.json", [])
+_stream_saved = [0.0]
+
+
+def active_stream():
+    return streams[-1] if streams and streams[-1].get("end") is None else None
+
+
+def stream_on(now):
+    if active_stream():
+        return
+    last = streams[-1] if streams else None
+    if last and now - last["end"] <= STREAM_MERGE:
+        last["end"] = None                      # 1 時間以内のつけ直し → 同じ配信の続き
+        last["segments"].append([now, None])
+    else:
+        streams.append({"id": str(int(now)), "start": now, "end": None, "title": "",
+                        "segments": [[now, None]], "buckets": {}})
+    save_json("streams.json", streams)
+
+
+def stream_off(now):
+    s = active_stream()
+    if not s:
+        return
+    s["end"] = now
+    s["segments"][-1][1] = now
+    save_json("streams.json", streams)
+
+
+def bucket(s, ts):
+    return s["buckets"].setdefault(str(int((ts - s["start"]) // 60)), {"vmax": 0, "vsum": 0, "n": 0, "c": 0})
+
+
+def stream_sample(now, viewers):
+    s = active_stream()
+    if not s:
+        return
+    b = bucket(s, now)
+    b["vmax"] = max(b["vmax"], viewers)
+    b["vsum"] += viewers
+    b["n"] += 1
+    if stream.get("title"):
+        s["title"] = stream["title"]
+    if now - _stream_saved[0] > 60:
+        save_json("streams.json", streams)
+        _stream_saved[0] = now
+
+
+def stream_comment(ts):
+    s = active_stream()
+    if s:
+        bucket(s, ts)["c"] += 1
+
+
+def stream_summary(s):
+    now = time.time()
+    dur = sum((e or now) - b for b, e in s["segments"])
+    bs = s["buckets"].values()
+    return {"id": s["id"], "start": s["start"], "end": s["end"], "title": s.get("title", ""),
+            "duration": int(dur), "restarts": len(s["segments"]) - 1,
+            "peak": max((b["vmax"] for b in bs), default=0),
+            "comments": sum(b["c"] for b in bs), "live": s["end"] is None}
+
+
+def page_viewers(now):
+    """ページを開いて再生中の端末数(サーバーの映像カウントの補助)"""
+    roots = set()
+    for dev, c in clients.items():
+        if c.get("viewing") and now - c["last"] <= 45:
+            roots.add(find(dev))
+    return len(roots)
+
+
+# ---------------------------------------------------------------- 見張り役(1秒ごと)
 def watch_stream():
-    """配信中→配信終了になった瞬間に、配信タイトルをリセットする"""
+    """配信の開始・終了を見張る。終了でタイトルをリセット、配信の記録、訪問の整理"""
     was_live = False
+    tick = 0
     while True:
+        now = time.time()
         live = bool((api_get(f"/v3/paths/get/{STREAM}") or {}).get("ready"))
-        if was_live and not live:
-            with lock:
+        with lock:
+            if live and not was_live:
+                stream_on(now)
+            if was_live and not live:
                 stream["title"] = ""
                 save_json("stream.json", stream)
                 _count_cache["data"] = None
+                stream_off(now)
+            if live and tick % 10 == 0:
+                snap = count_snapshot()
+                stream_sample(now, max(snap["viewers"], page_viewers(now)))
+            if tick % 30 == 0:
+                close_stale_visits(now)
         was_live = live
+        tick += 1
         time.sleep(1)
 
 
@@ -359,6 +548,27 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path.rstrip("/")
         if p in ("/count", ""):
             return self.send_json(200, count_snapshot())
+        if p.startswith("/api/admin/") and p != "/api/admin/state":
+            q = parse_qs(urlsplit(self.path).query)
+            arg = lambda k, dflt="": (q.get(k) or [dflt])[0]
+            with lock:
+                if not valid_token(self.token()):
+                    return self.send_json(401, {"error": "ログインしてください"})
+                if p == "/api/admin/visits":
+                    try:
+                        t_from, t_to = float(arg("from", "0")), float(arg("to", str(time.time() + 1)))
+                    except ValueError:
+                        return self.send_json(400, {"error": "期間が不正です"})
+                    only = find(arg("device")) if arg("device") else None
+                    return self.send_json(200, {"groups": visits_report(t_from, t_to, only)})
+                if p == "/api/admin/streams":
+                    return self.send_json(200, {"streams": [stream_summary(s) for s in reversed(streams[-200:])]})
+                if p == "/api/admin/stream":
+                    s = next((s for s in streams if s["id"] == arg("id")), None)
+                    if not s:
+                        return self.send_json(404, {"error": "見つかりません"})
+                    return self.send_json(200, dict(stream_summary(s), segments=s["segments"], buckets=s["buckets"]))
+            return self.send_json(404, {"error": "not found"})
         if p == "/api/admin/state":
             with lock:
                 if not valid_token(self.token()):
@@ -371,7 +581,7 @@ class Handler(BaseHTTPRequestHandler):
                         continue
                     root = find(dev)
                     g = groups.setdefault(root, {
-                        "key": root[:8], "ip": c["ip"], "ips": [], "names": [], "os": c["label"].split(" / ")[0],
+                        "key": root[:8], "root": root, "ip": c["ip"], "ips": [], "names": [], "os": c["label"].split(" / ")[0],
                         "browsers": [], "devices": [], "last": 0, "viewing": False, "ua": c["ua"],
                         "tabs": 0, "tab_detail": {}, "items": [], "first": seen.get(root, {}).get("first", c.get("first", now)),
                         "muted": bool(is_muted(dev)),
@@ -386,6 +596,8 @@ class Handler(BaseHTTPRequestHandler):
                     g["devices"].append(dev[:8])
                     g["last"] = max(g["last"], c["last"])
                     g["viewing"] = g["viewing"] or c["viewing"]
+                    ent = visits_open.get(dev, {}).get("start", c.get("first", now))
+                    g["entered"] = min(g.get("entered", ent), ent)
                     n_tabs = sum(1 for ts in c.get("tabs", {}).values() if now - ts <= TAB_WINDOW)
                     sv = seen.get(dev, {})
                     g["items"].append({
@@ -401,7 +613,7 @@ class Handler(BaseHTTPRequestHandler):
                 for g in groups.values():
                     g["ago"] = int(now - g["last"])
                     online.append(g)
-                online.sort(key=lambda c: c["last"], reverse=True)
+                online.sort(key=lambda c: (c["entered"], c["key"]))   # 入室順(順番は動かない)
                 data = {
                     "clients": online,
                     "comments": [dict(c, muted=bool(is_muted(c.get("device"), c.get("ip"), c.get("hw"))),
@@ -433,6 +645,7 @@ class Handler(BaseHTTPRequestHandler):
                     tabs = {t: ts for t, ts in prev.get("tabs", {}).items() if now - ts <= TAB_WINDOW}
                     hw = clean(d.get("hw"), 16)
                     remember(device, hw, ip, ua, clean(d.get("name"), NAME_MAX), now)
+                    visit_touch(device, now)
                     tab = clean(d.get("tab"), 32)
                     if tab:
                         tabs[tab] = now
@@ -472,6 +685,7 @@ class Handler(BaseHTTPRequestHandler):
                 ua = clean(self.headers.get("User-Agent"), 300)
                 label = device_label(ua)
                 remember(device, hw, ip, ua, name, now)
+                visit_touch(device, now)
                 append_comment({"ts": now, "name": name, "text": text,
                                 "device": device, "ip": ip, "label": label,
                                 "hw": clean(d.get("hw"), 16)})
