@@ -13,6 +13,7 @@ obs = obslua
 
 local DEFAULT_PAGES_URL = "https://y-sebastian263.github.io/Y-OBS/"
 local HLS_PORT = 8888
+local WEBRTC_PORT = 8889
 
 local cfg = {
   tools_dir   = "",
@@ -106,12 +107,16 @@ local function tools_ok()
   return dir, mtx, cfd
 end
 
-local function make_viewer_url(tunnel)
+local function make_viewer_url(tunnel, rtc_tunnel)
   local base = cfg.pages_url
   if base == "" then base = DEFAULT_PAGES_URL end
   if not base:match("/$") and not base:match("%.html$") then base = base .. "/" end
   local name = cfg.stream_name ~= "" and cfg.stream_name or "live"
-  return base .. "?src=" .. tunnel .. "/" .. name .. "/index.m3u8"
+  local url = base .. "?src=" .. tunnel .. "/" .. name .. "/index.m3u8"
+  if rtc_tunnel then
+    url = url .. "&rtc=" .. rtc_tunnel .. "/" .. name .. "/whep"
+  end
+  return url
 end
 
 ---------------------------------------------------------------------------
@@ -163,12 +168,15 @@ end
 local function poll_tunnel()
   state.poll_count = state.poll_count + 1
   local dir = winpath(cfg.tools_dir)
-  local text = read_file(dir .. "\\tunnel.log") or ""
-  local url = text:match("https://[%w%-]+%.trycloudflare%.com")
-  if url then
+  local pat = "https://[%w%-]+%.trycloudflare%.com"
+  local url = (read_file(dir .. "\\tunnel.log") or ""):match(pat)
+  local rtc = (read_file(dir .. "\\tunnel-rtc.log") or ""):match(pat)
+  -- 両方そろうのを待つ(低遅延用が遅いときは15秒で諦めて通常のみ)
+  if url and (rtc or state.poll_count >= 15) then
     obs.remove_current_callback()
     state.polling = false
-    state.viewer_url = make_viewer_url(url)
+    if not rtc then warn("低遅延用のトンネルが作れませんでした(通常モードのみで続行)") end
+    state.viewer_url = make_viewer_url(url, rtc)
     log("スマホ用URL: " .. state.viewer_url)
     open_qr_page()
     return
@@ -210,6 +218,7 @@ local function start_servers()
 
   kill_tools()
   os.remove(dir .. "\\tunnel.log")
+  os.remove(dir .. "\\tunnel-rtc.log")
 
   write_file(dir .. "\\y-obs-mediamtx.bat",
     "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. mtx .. "\" > mediamtx.log 2>&1\r\n")
@@ -218,7 +227,11 @@ local function start_servers()
     HLS_PORT .. " > tunnel.log 2>&1\r\n")
 
   run_hidden(dir .. "\\y-obs-mediamtx.bat")
+  write_file(dir .. "\\y-obs-tunnel-rtc.bat",
+    "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. cfd .. "\" tunnel --no-autoupdate --url http://127.0.0.1:" ..
+    WEBRTC_PORT .. " > tunnel-rtc.log 2>&1\r\n")
   run_hidden(dir .. "\\y-obs-tunnel.bat")
+  run_hidden(dir .. "\\y-obs-tunnel-rtc.bat")
   log("サーバーとトンネルを起動しました。URLを待っています…")
 
   state.viewer_url = ""

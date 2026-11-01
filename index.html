@@ -74,7 +74,7 @@
   const CONFIG = window.YOBS_CONFIG || {};
   const REALITY_PACKAGE = CONFIG.realityPackage || 'net.wrightflyer.le.reality';
   const RETURN_URL = CONFIG.returnUrl || 'https://reality.app/';
-  const KEY_SRC = 'yobs.src', KEY_SOUND = 'yobs.sound';
+  const KEY_SRC = 'yobs.src', KEY_RTC = 'yobs.rtc', KEY_SOUND = 'yobs.sound';
 
   const $ = (id) => document.getElementById(id);
   const video = $('video'), overlay = $('overlay'), msg = $('msg');
@@ -91,16 +91,19 @@
   const params = new URLSearchParams(location.search);
   if (params.get('src')) {
     store.set(KEY_SRC, params.get('src').trim());
+    store.set(KEY_RTC, (params.get('rtc') || '').trim());
     // 接続先をアドレスバーに残さない
     history.replaceState(null, '', location.pathname);
   }
 
   let src = store.get(KEY_SRC);
+  let rtcUrl = store.get(KEY_RTC);
 
   // ---- 音声(自動再生はミュート必須なので、タップ時に音を出す) ----
   let soundOn = store.get(KEY_SOUND) !== 'off';
   function drawSound() { $('sound').textContent = soundOn ? '🔊 音あり' : '🔇 音なし'; }
-  function applySound() { video.muted = !soundOn; drawSound(); }
+  let userTapped = false;
+  function applySound() { userTapped = true; video.muted = !soundOn; drawSound(); }
   drawSound();
 
   // ---- 状態表示 ----
@@ -112,13 +115,22 @@
   function say(text) { msg.textContent = text || ''; }
 
   // ---- 再生 ----
-  let hls = null, retryTimer = null;
+  // Android 等: 低遅延(WebRTC/WHEP)を優先し、つながらなければ HLS へ。
+  // iPhone: Safari は WebRTC 映像をミニプレイヤーにできないため HLS。
+  let hls = null, pc = null, retryTimer = null, rtcTimer = null;
+  let mode = '';            // 'rtc' | 'hls'
+  let rtcGaveUp = false;    // このページを開いている間 WebRTC がつながらなかった
+  let gen = 0;              // 古い接続処理を無視するための番号
 
   function stopPlayer() {
-    clearTimeout(retryTimer);
+    gen++;
+    clearTimeout(retryTimer); clearTimeout(rtcTimer);
     if (hls) { hls.destroy(); hls = null; }
+    if (pc) { try { pc.close(); } catch {} pc = null; }
+    video.srcObject = null;
     video.removeAttribute('src');
     video.load();
+    mode = '';
   }
 
   function scheduleRetry() {
@@ -128,6 +140,10 @@
     retryTimer = setTimeout(startPlayer, 3000);
   }
 
+  function useRtc() {
+    return !!rtcUrl && !isIOS && !rtcGaveUp && 'RTCPeerConnection' in window;
+  }
+
   function startPlayer() {
     stopPlayer();
     if (!src) {
@@ -135,9 +151,70 @@
       showOverlay('接続先が未設定です。<br>PCのOBSに表示されたQRコードから開いてください。');
       return;
     }
-    video.muted = true; // 自動再生のため最初はミュート。タップ時に applySound()
+    video.muted = !userTapped || !soundOn; // 自動再生のため最初はミュート
     setStatus('wait', '接続中');
+    if (useRtc()) startRtc(); else startHls();
+  }
 
+  function rtcFallback() {
+    // WebRTC がつながらない(別の回線など)→ 今回は HLS で再生
+    rtcGaveUp = true;
+    say('低遅延モードでつながらなかったので、通常モード(2秒前後)で再生しています。');
+    startPlayer();
+  }
+
+  function waitIce(conn) {
+    if (conn.iceGatheringState === 'complete') return Promise.resolve();
+    return new Promise((res) => {
+      const t = setTimeout(res, 1500);
+      conn.addEventListener('icegatheringstatechange', () => {
+        if (conn.iceGatheringState === 'complete') { clearTimeout(t); res(); }
+      });
+    });
+  }
+
+  async function startRtc() {
+    const my = gen;
+    mode = 'rtc';
+    const conn = pc = new RTCPeerConnection();
+    conn.addTransceiver('video', { direction: 'recvonly' });
+    conn.addTransceiver('audio', { direction: 'recvonly' });
+    const ms = new MediaStream();
+    conn.ontrack = (e) => {
+      ms.addTrack(e.track);
+      try { e.receiver.jitterBufferTarget = 0; } catch {}
+      if (video.srcObject !== ms) video.srcObject = ms;
+      video.play().catch(() => {});
+    };
+    conn.onconnectionstatechange = () => {
+      if (my !== gen) return;
+      const st = conn.connectionState;
+      if (st === 'failed') rtcFallback();
+      else if (st === 'disconnected' || st === 'closed') scheduleRetry();
+    };
+    // 一定時間つながらなければ HLS に切り替え
+    rtcTimer = setTimeout(() => { if (my === gen && conn.connectionState !== 'connected') rtcFallback(); }, 8000);
+
+    try {
+      await conn.setLocalDescription(await conn.createOffer());
+      await waitIce(conn);
+      if (my !== gen) return;
+      const res = await fetch(rtcUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/sdp' },
+        body: conn.localDescription.sdp,
+      });
+      if (my !== gen) return;
+      if (res.status === 404 || res.status === 400) { clearTimeout(rtcTimer); scheduleRetry(); return; } // まだ配信していない
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await conn.setRemoteDescription({ type: 'answer', sdp: await res.text() });
+    } catch (e) {
+      if (my === gen) rtcFallback();
+    }
+  }
+
+  function startHls() {
+    mode = 'hls';
     const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
     // iPhone は標準プレイヤー(ミニプレイヤー対応のため)、それ以外は hls.js を優先
     if (isIOS && nativeHls) {
@@ -165,16 +242,20 @@
     }
   }
 
-  video.addEventListener('playing', () => { setStatus('live', '再生中'); showOverlay(''); });
+  video.addEventListener('playing', () => {
+    clearTimeout(rtcTimer);
+    setStatus('live', mode === 'rtc' ? '再生中(低遅延)' : '再生中');
+    showOverlay('');
+  });
   video.addEventListener('waiting', () => setStatus('wait', '読み込み中'));
-  video.addEventListener('error', () => { if (!hls) scheduleRetry(); });
+  video.addEventListener('error', () => { if (mode === 'hls' && !hls) scheduleRetry(); });
   video.addEventListener('ended', scheduleRetry);
   // 一時停止されたら(ミニプレイヤー中も含めて)すぐ再開する
   video.addEventListener('pause', () => { if (src && !video.ended) setTimeout(() => video.play().catch(() => {}), 300); });
 
   // 標準プレイヤー時、遅れが溜まったら最新位置へ追いつく
   setInterval(() => {
-    if (hls || !video.seekable || !video.seekable.length) return;
+    if (mode !== 'hls' || hls || !video.seekable || !video.seekable.length) return;
     const edge = video.seekable.end(video.seekable.length - 1);
     if (edge - video.currentTime > 4) video.currentTime = edge - 1;
   }, 2000);
@@ -263,7 +344,7 @@
     video.play().catch(() => {});
   });
 
-  $('reload').addEventListener('click', () => { say(''); startPlayer(); applySound(); });
+  $('reload').addEventListener('click', () => { say(''); rtcGaveUp = false; applySound(); startPlayer(); });
 
   // 画面に戻ってきたら止まっていないか確認
   document.addEventListener('visibilitychange', () => {

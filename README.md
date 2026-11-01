@@ -9,7 +9,8 @@ OBS ──(RTMP)──▶ MediaMTX(PC内のサーバー) ──▶ Cloudflareト
 
 - スマホ用ページ: `index.html`(GitHub Pagesで公開)。設定は `config.js` にまとめてあり、ページ上には表示されません
 - OBSプラグイン: `obs/y-obs-miniplayer.lua`(OBSのスクリプト機能で読み込む。Pythonなどのインストールは不要)
-- 遅延: 1〜3秒くらい
+- 遅延: Androidは低遅延モード(WebRTC)で1秒未満、iPhoneは2秒前後
+  - Androidでも、PCとスマホが別の回線などで低遅延モードがつながらない時は、自動で通常モード(2秒前後)になります
 - 音声: あり(最初だけミュートで始まり、ボタンをタップした時点で音が出ます。音量はOBS側で調整)
 
 > **なぜHLS方式なのか:** iPhoneのSafariでは、低遅延方式(WebRTC)の映像をミニプレイヤーにできない仕様があります。iPhoneでも確実にミニプレイヤーにできるHLS方式にしています。
