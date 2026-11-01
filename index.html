@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102001305';
+  window.YOBS_VERSION = '20261102001613';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -117,7 +117,11 @@
   .ban-icon { font-size: 64px; }
   .ban-main { font-size: 20px; font-weight: 800; }
   /* 管理画面: 左に通常画面、右に管理画面 */
-  body.admin-on .layout { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 18px; max-width: 1400px; margin: 0 auto; }
+  /* 管理画面: 左=通常画面 / 中=管理 / 右=コメント */
+  body.admin-on .layout { display: grid; grid-template-columns: minmax(0, 480px) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; max-width: 1700px; margin: 0 auto; }
+  @media (max-width: 1150px) { body.admin-on .layout { grid-template-columns: minmax(0, 440px) minmax(0, 1fr); }
+    body.admin-on #adminComments { grid-column: 2; } body.admin-on .layout .wrap { grid-row: span 2; }
+    body.admin-on .admin { height: auto; position: static; } body.admin-on .comments { max-height: 60vh; } }
   body.admin-on .wrap { margin: 0; width: 100%; }
   @media (max-width: 820px) { body.admin-on .layout { grid-template-columns: 1fr; } }
   .admin { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 14px;
@@ -130,7 +134,7 @@
   .badge { background: var(--accent2); border-radius: 99px; padding: 1px 8px; font-size: 12px; }
   .muted { color: var(--sub); font-weight: 400; }
   .note { font-size: 11px; line-height: 1.5; margin: 0 0 8px; }
-  .tablewrap { overflow: auto; max-height: 34vh; border: 1px solid var(--line); border-radius: 10px; }
+  .tablewrap { overflow: auto; flex: 1; min-height: 120px; border: 1px solid var(--line); border-radius: 10px; }
   table.clients { width: 100%; border-collapse: collapse; font-size: 12px; }
   table.clients th, table.clients td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
   table.clients th { position: sticky; top: 0; background: #2a2338; font-weight: 600; }
@@ -216,7 +220,7 @@
     </div>
     <p id="titleMsg" class="titlemsg">配信中だけ視聴ページの上に表示されます。OBSの配信終了で自動的に消えます。</p>
   </section>
-  <section class="admin-sec">
+  <section class="admin-sec grow">
     <h3>アクセス中の端末 <span id="clientCount" class="badge">0</span>
       <small id="countDetail" class="muted"></small></h3>
     <p class="muted note">※ブラウザからはMACアドレス・端末名を取得できないため、「同じIP+同じ端末キー(画面・GPUなどから作成)」を1台として表示しています。同じ回線の同じ機種は1台にまとまることがあります。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
@@ -227,6 +231,9 @@
       </table>
     </div>
   </section>
+</aside>
+
+<aside id="adminComments" class="admin" hidden>
   <section class="admin-sec grow">
     <h3>コメント <span id="commentCount" class="badge">0</span></h3>
     <div id="commentList" class="comments"></div>
@@ -805,6 +812,7 @@
   function startAdmin() {
     document.body.classList.add('admin-on');
     $('admin').hidden = false;
+    $('adminComments').hidden = false;
     refresh();
     clearInterval(adminTimer);
     adminTimer = setInterval(refresh, 2000);
@@ -815,6 +823,7 @@
     try { sessionStorage.removeItem('yobs.token'); } catch {}
     document.body.classList.remove('admin-on');
     $('admin').hidden = true;
+    $('adminComments').hidden = true;
   }
   $('adminLogout').addEventListener('click', async () => {
     try { await post('/admin/logout', {}, token); } catch {}
