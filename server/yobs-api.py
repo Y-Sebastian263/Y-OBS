@@ -91,9 +91,8 @@ def load_comments():
 
 
 comments = load_comments()
-stream = load_json("stream.json", {"title": ""})
+stream = load_json("stream.json", {"title": ""})                # 配信タイトル(配信終了でリセット)
 mutes = load_json("mutes.json", {"devices": {}, "keys": {}})   # コメントのミュート
-   # 配信タイトル(配信終了でリセット)
 TITLE_MAX = 60
 
 
@@ -153,8 +152,79 @@ def mute_key(ip, hw):
     return f"{ip}|{hw}" if hw else ""
 
 
-def is_muted(device, ip, hw):
-    return (device and device in mutes["devices"]) or (mute_key(ip, hw) in mutes["keys"])
+# ---------------------------------------------------------------- 端末のつながり
+# 基本の単位は「ブラウザID」。次のどちらかを満たしたブラウザ同士を同じ端末として結びつけ、
+# 一度結びついたらずっと覚えておく(あとで IP や名前が変わっても同じ端末のまま)。
+#   1) 端末キーが同じ + 同じ時間に同じ IP から来ている
+#   2) 端末キーが同じ + 同じ名前を登録したことがある
+# 名前だけ・IP だけでは結びつけない。
+seen = load_json("seen.json", {})     # ブラウザID -> {hw, label, ua, first, last, names[], ips[]}
+links = load_json("links.json", {})   # ブラウザID -> 親のブラウザID(つながりの木)
+_seen_saved = [0.0]
+LINK_WINDOW = 60                      # 秒: 「同じ時間」とみなす幅
+
+
+def find(d):
+    root = d
+    while links.get(root, root) != root:
+        root = links[root]
+    while links.get(d, d) != root:     # 経路を短くしておく
+        nxt = links[d]
+        links[d] = root
+        d = nxt
+    return root
+
+
+def union(a, b):
+    ra, rb = find(a), find(b)
+    if ra == rb:
+        return
+    # 先に見つかった方を代表にする(端末番号がなるべく変わらないように)
+    if seen.get(rb, {}).get("first", 0) < seen.get(ra, {}).get("first", 0):
+        ra, rb = rb, ra
+    links[rb] = ra
+    save_json("links.json", links)
+
+
+def remember(device, hw, ip, ua, name, now):
+    """ブラウザの情報を記録し、条件を満たす他のブラウザと結びつける"""
+    if not device:
+        return
+    s = seen.setdefault(device, {"hw": hw, "first": now, "names": [], "ips": []})
+    changed = device not in links and not s.get("label")
+    if hw and s.get("hw") != hw:
+        s["hw"] = hw
+        changed = True
+    s["label"], s["ua"], s["last"] = device_label(ua), ua, now
+    if ip and ip not in s["ips"]:
+        s["ips"] = (s["ips"] + [ip])[-10:]
+        changed = True
+    if name and name != "名無し" and name not in s["names"]:
+        s["names"] = (s["names"] + [name])[-10:]
+        changed = True
+    if changed or now - _seen_saved[0] > 60:
+        save_json("seen.json", seen)
+        _seen_saved[0] = now
+    if not hw:
+        return
+    for other, c in clients.items():                       # 1) 同じ時間に同じ IP
+        if other != device and c.get("hw") == hw and c.get("ip") == ip and now - c["last"] <= LINK_WINDOW:
+            union(device, other)
+    if name and name != "名無し":                            # 2) 同じ名前の登録歴
+        for other, o in seen.items():
+            if other != device and o.get("hw") == hw and name in o.get("names", []):
+                union(device, other)
+
+
+def is_muted(device, ip="", hw=""):
+    """その端末(結びついた全ブラウザ)がミュートされているか"""
+    if device and device in mutes["devices"]:
+        return True
+    if device:
+        root = find(device)
+        if any(find(m) == root for m in mutes["devices"]):
+            return True
+    return bool(hw) and mute_key(ip, hw) in mutes["keys"]
 
 
 def is_banned(device, ip):
@@ -294,35 +364,39 @@ class Handler(BaseHTTPRequestHandler):
                 if not valid_token(self.token()):
                     return self.send_json(401, {"error": "ログインしてください"})
                 now = time.time()
-                # 同じ IP + 同じ端末キー(画面・GPU などブラウザが違っても同じ情報)を 1 台にまとめる
+                # つながっているブラウザ同士を 1 台にまとめる
                 groups = {}
                 for dev, c in clients.items():
                     if now - c["last"] > ONLINE_WINDOW:
                         continue
-                    key = (c["ip"], c.get("hw") or dev)
-                    g = groups.setdefault(key, {
-                        "key": (c.get("hw") or dev)[:8], "ip": c["ip"], "names": [], "os": c["label"].split(" / ")[0],
+                    root = find(dev)
+                    g = groups.setdefault(root, {
+                        "key": root[:8], "ip": c["ip"], "ips": [], "names": [], "os": c["label"].split(" / ")[0],
                         "browsers": [], "devices": [], "last": 0, "viewing": False, "ua": c["ua"],
-                        "tabs": 0, "tab_detail": {}, "items": [], "first": c.get("first", now),
+                        "tabs": 0, "tab_detail": {}, "items": [], "first": seen.get(root, {}).get("first", c.get("first", now)),
+                        "muted": bool(is_muted(dev)),
                     })
+                    if c["ip"] not in g["ips"]:
+                        g["ips"].append(c["ip"])
                     if c["name"] and c["name"] not in g["names"]:
                         g["names"].append(c["name"])
                     br = c["label"].split(" / ")[-1]
                     if br not in g["browsers"]:
                         g["browsers"].append(br)
                     g["devices"].append(dev[:8])
+                    g["last"] = max(g["last"], c["last"])
+                    g["viewing"] = g["viewing"] or c["viewing"]
                     n_tabs = sum(1 for ts in c.get("tabs", {}).values() if now - ts <= TAB_WINDOW)
-                    g["first"] = min(g["first"], c.get("first", now))
+                    sv = seen.get(dev, {})
                     g["items"].append({
                         "device": dev, "browser": br, "label": c["label"], "name": c["name"], "ua": c["ua"],
-                        "tabs": n_tabs, "first": c.get("first", now), "last": c["last"], "viewing": c["viewing"],
-                        "muted": bool(is_muted(dev, c["ip"], c.get("hw"))),
+                        "ip": c["ip"], "tabs": n_tabs, "first": sv.get("first", c.get("first", now)),
+                        "last": c["last"], "viewing": c["viewing"], "muted": bool(is_muted(dev)),
+                        "names_hist": sv.get("names", []), "ips_hist": sv.get("ips", []),
                     })
                     if n_tabs:
                         g["tabs"] += n_tabs
                         g["tab_detail"][br] = g["tab_detail"].get(br, 0) + n_tabs
-                    g["last"] = max(g["last"], c["last"])
-                    g["viewing"] = g["viewing"] or c["viewing"]
                 online = []
                 for g in groups.values():
                     g["ago"] = int(now - g["last"])
@@ -330,7 +404,8 @@ class Handler(BaseHTTPRequestHandler):
                 online.sort(key=lambda c: c["last"], reverse=True)
                 data = {
                     "clients": online,
-                    "comments": [dict(c, muted=bool(is_muted(c.get("device"), c.get("ip"), c.get("hw"))))
+                    "comments": [dict(c, muted=bool(is_muted(c.get("device"), c.get("ip"), c.get("hw"))),
+                                      gkey=find(c.get("device", ""))[:8])
                                  for c in reversed(comments[-300:])],
                     "mutes": sorted(mutes["devices"].values(), key=lambda m: m["ts"], reverse=True),
                     "bans": {"devices": len(bans["devices"]), "ips": len(bans["ips"])},
@@ -356,13 +431,15 @@ class Handler(BaseHTTPRequestHandler):
                     ua = clean(self.headers.get("User-Agent"), 300)
                     prev = clients.get(device, {})
                     tabs = {t: ts for t, ts in prev.get("tabs", {}).items() if now - ts <= TAB_WINDOW}
+                    hw = clean(d.get("hw"), 16)
+                    remember(device, hw, ip, ua, clean(d.get("name"), NAME_MAX), now)
                     tab = clean(d.get("tab"), 32)
                     if tab:
                         tabs[tab] = now
                     name = clean(d.get("name"), NAME_MAX) or prev.get("name", "") or names.get(device, {}).get("name", "")
                     clients[device] = {
                         "name": name, "ip": ip, "ua": ua, "label": device_label(ua),
-                        "hw": clean(d.get("hw"), 16),
+                        "hw": hw,
                         "first": prev.get("first", now), "last": now,
                         "viewing": bool(d.get("viewing")),
                         "tabs": tabs,
@@ -394,6 +471,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(200, {"ok": True})
                 ua = clean(self.headers.get("User-Agent"), 300)
                 label = device_label(ua)
+                remember(device, hw, ip, ua, name, now)
                 append_comment({"ts": now, "name": name, "text": text,
                                 "device": device, "ip": ip, "label": label,
                                 "hw": clean(d.get("hw"), 16)})

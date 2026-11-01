@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102002519';
+  window.YOBS_VERSION = '20261102004410';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -246,7 +246,7 @@
   <section class="admin-sec grow">
     <h3>アクセス中の端末 <span id="clientCount" class="badge">0</span>
       <small id="countDetail" class="muted"></small></h3>
-    <p class="muted note">※ブラウザからはMACアドレス・端末名を取得できないため、「同じIP+同じ端末キー(画面・GPUなどから作成)」を1台として表示しています。同じ回線の同じ機種は1台にまとまることがあります。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
+    <p class="muted note">※MACアドレス・端末名はブラウザから取得できないため、ブラウザごとのIDを基本に、同じ機種で「同じ時間に同じIP」または「同じ名前を登録」したブラウザを1台として結びつけて表示しています(結びつきは記録され、IPや名前が変わっても維持)。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
     <div class="tablewrap">
       <table class="clients">
         <thead><tr><th>名前</th><th>端末</th><th>表示数</th><th>状態</th><th></th></tr></thead>
@@ -723,7 +723,9 @@
     try { navigator.sendBeacon(API + '/bye', JSON.stringify({ device, tab })); } catch {}
   });
 
-  // ---- 端末キー: ブラウザが違っても同じになる情報(画面・GPU・CPU数・タイムゾーン)から作る ----
+  // ---- 端末キー: ブラウザが違っても、ズームしても変わらない情報から作る ----
+  //   スマホ/タブレット: 画面の実際の画素数・GPU・CPU数・OS・タイムゾーン
+  //   PC: 画面はモニターで変わるので使わず、GPU・CPU数・OS・タイムゾーン
   let hw = '';
   const hwReady = (async () => {
     try {
@@ -733,10 +735,18 @@
         const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
         gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : (gl ? gl.getParameter(gl.RENDERER) : '');
       } catch {}
-      const sw = Math.min(screen.width, screen.height), sh = Math.max(screen.width, screen.height);
-      const src = [sw, sh, window.devicePixelRatio, gpu, navigator.hardwareConcurrency || '',
-        Intl.DateTimeFormat().resolvedOptions().timeZone, /iP(hone|ad)/.test(navigator.userAgent) ? 'ios' :
-        /Android/.test(navigator.userAgent) ? 'android' : navigator.platform].join('|');
+      const u = navigator.userAgent;
+      const os = /iP(hone|ad|od)/.test(u) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'ios'
+        : /Android/.test(u) ? 'android' : /Windows/.test(u) ? 'windows' : /Mac/.test(u) ? 'mac' : 'other';
+      const mobile = os === 'ios' || os === 'android';
+      let scr = '';
+      if (mobile) {
+        // 実際の画素数(CSSの大きさ × 倍率)。ズームしても積は変わらない
+        const a = Math.round(screen.width * devicePixelRatio), b = Math.round(screen.height * devicePixelRatio);
+        scr = Math.min(a, b) + 'x' + Math.max(a, b);
+      }
+      const src = [os, scr, gpu, navigator.hardwareConcurrency || '',
+        Intl.DateTimeFormat().resolvedOptions().timeZone].join('|');
       const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(src));
       hw = Array.from(new Uint8Array(buf)).slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
     } catch {}
@@ -930,8 +940,8 @@
     add('名前', c.names.join(', ') || '—');
     add('端末', c.os);
     add('ブラウザ', c.browsers.join(', '));
-    add('IPアドレス', c.ip, true);
-    add('端末キー', c.key, true);
+    add('IPアドレス', (c.ips || [c.ip]).join(', '), true);
+    add('端末番号', c.key, true);
     add('表示数', String(c.tabs || 0));
     add('最初のアクセス', fmtDate(c.first));
     add('最後の通信', `${c.ago}秒前`);
@@ -943,6 +953,9 @@
       const add2 = (k, v, mono) => { d2.append(el('dt', '', k)); d2.append(el('dd', mono ? 'mono' : '', v)); };
       add2('ブラウザID', it.device, true);
       add2('名前', it.name || '—');
+      add2('名前の履歴', (it.names_hist || []).join(', ') || '—');
+      add2('今のIP', it.ip || '—', true);
+      add2('IPの履歴', (it.ips_hist || []).join(', ') || '—', true);
       add2('表示数', String(it.tabs));
       add2('状態', it.viewing ? '視聴中' : '表示中');
       add2('最初', fmtDate(it.first));
@@ -950,7 +963,7 @@
       card.append(d2);
       box.append(card);
     }
-    box.append(el('p', 'muted note', '※MACアドレス・端末名はブラウザから取得できないため表示できません。'));
+    box.append(el('p', 'muted note', '※MACアドレス・端末名はブラウザから取得できないため表示できません。同じ端末キーで「同じ時間に同じIP」または「同じ名前を登録」したブラウザを同じ端末として結びつけ、以後ずっと同じ端末として扱います。'));
     $('detailModal').hidden = false;
   }
   $('detailClose').addEventListener('click', () => { $('detailModal').hidden = true; });
@@ -1009,7 +1022,7 @@
         mb.addEventListener('click', () => setMute(c.device, !c.muted, c.name));
         head.append(mb);
         const meta = el('div', 'c-meta');
-        meta.append(document.createTextNode(c.label + ' / 端末キー '), el('span', 'mono', (c.hw || c.device).slice(0, 8)),
+        meta.append(document.createTextNode(c.label + ' / 端末番号 '), el('span', 'mono', c.gkey || c.device.slice(0, 8)),
           document.createTextNode(' / IP '), el('span', 'mono', c.ip));
         item.append(head, el('div', 'c-text', c.text), meta);
         list.append(item);
