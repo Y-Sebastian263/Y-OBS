@@ -4,6 +4,23 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14111c">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<script>
+  // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
+  window.YOBS_VERSION = '20261101233850';
+  fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.version && d.version !== window.YOBS_VERSION) {
+        var key = 'yobs.reloaded.' + d.version;
+        try { if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, '1'); } catch (e) {}
+        location.replace(location.pathname + '?v=' + encodeURIComponent(d.version));
+      }
+    })
+    .catch(function () {});
+</script>
 <title>Y-OBS</title>
 <style>
   :root {
