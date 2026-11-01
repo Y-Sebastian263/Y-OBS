@@ -263,10 +263,28 @@ class Handler(BaseHTTPRequestHandler):
                 if not valid_token(self.token()):
                     return self.send_json(401, {"error": "ログインしてください"})
                 now = time.time()
-                online = []
+                # 同じ IP + 同じ端末キー(画面・GPU などブラウザが違っても同じ情報)を 1 台にまとめる
+                groups = {}
                 for dev, c in clients.items():
-                    if now - c["last"] <= ONLINE_WINDOW:
-                        online.append({"device": dev, **c, "ago": int(now - c["last"])})
+                    if now - c["last"] > ONLINE_WINDOW:
+                        continue
+                    key = (c["ip"], c.get("hw") or dev)
+                    g = groups.setdefault(key, {
+                        "key": (c.get("hw") or dev)[:8], "ip": c["ip"], "names": [], "os": c["label"].split(" / ")[0],
+                        "browsers": [], "devices": [], "last": 0, "viewing": False, "ua": c["ua"],
+                    })
+                    if c["name"] and c["name"] not in g["names"]:
+                        g["names"].append(c["name"])
+                    br = c["label"].split(" / ")[-1]
+                    if br not in g["browsers"]:
+                        g["browsers"].append(br)
+                    g["devices"].append(dev[:8])
+                    g["last"] = max(g["last"], c["last"])
+                    g["viewing"] = g["viewing"] or c["viewing"]
+                online = []
+                for g in groups.values():
+                    g["ago"] = int(now - g["last"])
+                    online.append(g)
                 online.sort(key=lambda c: c["last"], reverse=True)
                 data = {
                     "clients": online,
@@ -295,6 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                     name = clean(d.get("name"), NAME_MAX) or prev.get("name", "") or names.get(device, {}).get("name", "")
                     clients[device] = {
                         "name": name, "ip": ip, "ua": ua, "label": device_label(ua),
+                        "hw": clean(d.get("hw"), 16),
                         "first": prev.get("first", now), "last": now,
                         "viewing": bool(d.get("viewing")),
                     }
@@ -314,7 +333,8 @@ class Handler(BaseHTTPRequestHandler):
                 ua = clean(self.headers.get("User-Agent"), 300)
                 label = device_label(ua)
                 append_comment({"ts": now, "name": name, "text": text,
-                                "device": device, "ip": ip, "label": label})
+                                "device": device, "ip": ip, "label": label,
+                                "hw": clean(d.get("hw"), 16)})
                 if names.get(device, {}).get("name") != name:
                     names[device] = {"name": name, "ip": ip, "label": label, "updated": now}
                     save_json("names.json", names)

@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261101235718';
+  window.YOBS_VERSION = '20261102000226';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -194,10 +194,10 @@
   <section class="admin-sec">
     <h3>アクセス中の端末 <span id="clientCount" class="badge">0</span>
       <small id="countDetail" class="muted"></small></h3>
-    <p class="muted note">※ブラウザからはMACアドレス・端末名を取得できないため、端末ID(ブラウザごとの固有ID)・端末の種類・IPアドレスで表示しています。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
+    <p class="muted note">※ブラウザからはMACアドレス・端末名を取得できないため、「同じIP+同じ端末キー(画面・GPUなどから作成)」を1台として表示しています。同じ回線の同じ機種は1台にまとまることがあります。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
     <div class="tablewrap">
       <table class="clients">
-        <thead><tr><th>名前</th><th>端末</th><th>端末ID</th><th>IP</th><th>状態</th></tr></thead>
+        <thead><tr><th>名前</th><th>端末</th><th>ブラウザ</th><th>端末キー</th><th>IP</th><th>状態</th></tr></thead>
         <tbody id="clientRows"></tbody>
       </table>
     </div>
@@ -647,6 +647,25 @@
   }
   $('cName').value = store.get('yobs.name');
 
+  // ---- 端末キー: ブラウザが違っても同じになる情報(画面・GPU・CPU数・タイムゾーン)から作る ----
+  let hw = '';
+  const hwReady = (async () => {
+    try {
+      let gpu = '';
+      try {
+        const gl = document.createElement('canvas').getContext('webgl');
+        const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+        gpu = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : (gl ? gl.getParameter(gl.RENDERER) : '');
+      } catch {}
+      const sw = Math.min(screen.width, screen.height), sh = Math.max(screen.width, screen.height);
+      const src = [sw, sh, window.devicePixelRatio, gpu, navigator.hardwareConcurrency || '',
+        Intl.DateTimeFormat().resolvedOptions().timeZone, /iP(hone|ad)/.test(navigator.userAgent) ? 'ios' :
+        /Android/.test(navigator.userAgent) ? 'android' : navigator.platform].join('|');
+      const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(src));
+      hw = Array.from(new Uint8Array(buf)).slice(0, 8).map((b) => b.toString(16).padStart(2, '0')).join('');
+    } catch {}
+  })();
+
   async function post(path, body, token) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = 'Bearer ' + token;
@@ -665,9 +684,10 @@
 
   // ---- 挨拶(アクセス中の端末として表示するため)----
   async function hello() {
+    await hwReady;
     try {
       const v = $('video');
-      const r = await post('/hello', { device, name: store.get('yobs.name'), viewing: !!(v && !v.paused) });
+      const r = await post('/hello', { device, hw, name: store.get('yobs.name'), viewing: !!(v && !v.paused) });
       if (r.data && r.data.banned) showBan();
     } catch {}
   }
@@ -684,7 +704,7 @@
     if (name) store.set('yobs.name', name);   // 名前はこのブラウザに保存
     $('cSend').disabled = true;
     try {
-      const r = await post('/comment', { device, name, text });
+      const r = await post('/comment', { device, hw, name, text });
       if (r.ok) { $('cText').value = ''; $('cMsg').textContent = '送信しました'; }
       else { $('cMsg').textContent = (r.data && r.data.error) || '送信できませんでした'; if (r.status === 403) showBan(); }
     } catch { $('cMsg').textContent = '送信できませんでした'; }
@@ -780,13 +800,14 @@
     for (const c of d.clients) {
       const tr = el('tr');
       tr.append(
-        el('td', '', c.name || '—'),
-        el('td', '', c.label),
-        el('td', 'mono', c.device.slice(0, 8)),
+        el('td', '', c.names.join(', ') || '—'),
+        el('td', '', c.os),
+        el('td', '', c.browsers.join(', ')),
+        el('td', 'mono', c.key),
         el('td', 'mono', c.ip),
         el('td', '', c.ago <= 35 ? (c.viewing ? '視聴中' : '表示中') : `${c.ago}秒前`),
       );
-      tr.title = c.ua;
+      tr.title = 'ブラウザごとのID: ' + c.devices.join(', ');
       rows.append(tr);
     }
 
@@ -802,7 +823,7 @@
         const head = el('div', 'c-head');
         head.append(el('span', 'c-name', c.name), el('span', 'c-time', fmtDate(c.ts)));
         const meta = el('div', 'c-meta');
-        meta.append(document.createTextNode(c.label + ' / ID '), el('span', 'mono', c.device.slice(0, 8)),
+        meta.append(document.createTextNode(c.label + ' / 端末キー '), el('span', 'mono', (c.hw || c.device).slice(0, 8)),
           document.createTextNode(' / IP '), el('span', 'mono', c.ip));
         item.append(head, el('div', 'c-text', c.text), meta);
         list.append(item);
