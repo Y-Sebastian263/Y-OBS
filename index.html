@@ -86,10 +86,10 @@
   </div>
 
   <div class="btns">
-    <button id="goReality" class="primary">ミニプレイヤーにしてREALITYへ戻る</button>
+    <button id="pipOnly" class="primary">ミニプレイヤーにする</button>
     <div class="row2">
-      <button id="pipOnly" class="secondary">ミニプレイヤーだけ</button>
       <button id="sound" class="secondary">🔊 音あり</button>
+      <button id="reload" class="secondary">🔄 再接続</button>
     </div>
     <div id="volRow" class="volrow">
       <span class="vollabel">音量</span>
@@ -97,7 +97,6 @@
       <span id="volText" class="voltext">80%</span>
     </div>
     <p id="volIos" class="volios" hidden>iPhoneは本体の音量ボタンで調整してください</p>
-    <button id="reload" class="secondary wide">🔄 再接続</button>
   </div>
   <div id="msg" class="msg"></div>
 
@@ -384,38 +383,17 @@
   // iPhone はページからホームへ戻せないので、スワイプの案内を出す。
   let wantHome = false;
   function onPipEntered() {
-    $('goReality').textContent = 'REALITYを開く';
     if (wantReturn) setTimeout(openReality, 150);
     if (wantHome && isIOS) $('homeHint').hidden = false;
     wantHome = false;
   }
   function onPipLeft() {
-    $('goReality').textContent = 'ミニプレイヤーにしてREALITYへ戻る';
     $('homeHint').hidden = true;
   }
   $('homeHintClose').addEventListener('click', () => { $('homeHint').hidden = true; });
   video.addEventListener('enterpictureinpicture', onPipEntered);
   video.addEventListener('leavepictureinpicture', onPipLeft);
   video.addEventListener('webkitpresentationmodechanged', () => inPip() ? onPipEntered() : onPipLeft());
-
-  $('goReality').addEventListener('click', () => {
-    say('');
-    applySound();
-    if (inPip()) { openReality(); return; }
-    wantReturn = true;
-    enterPip().catch((e) => {
-      wantReturn = false;
-      say(e.message + '。そのままREALITYを開く場合はもう一度タップ。');
-      $('goReality').textContent = 'REALITYを開く(映像なし)';
-      $('goReality').onclick = () => { $('goReality').onclick = null; openReality(); };
-    });
-    // 自動で切り替わらなかったとき用の案内
-    setTimeout(() => {
-      if (wantReturn && document.visibilityState === 'visible' && inPip()) {
-        say('REALITYが開かない時は、もう一度「REALITYを開く」をタップしてください。');
-      }
-    }, 1500);
-  });
 
   $('pipOnly').addEventListener('click', () => {
     say('');
