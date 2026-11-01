@@ -9,6 +9,7 @@ Caddy 経由で https://<host>/count と https://<host>/api/... に公開され�
   POST /api/login             管理ログイン {"device","pin"} → {"token"}
   GET  /api/admin/state       管理画面のデータ(Authorization: Bearer <token>)
   POST /api/admin/title        配信タイトルを設定(配信終了で自動リセット)
+  POST /api/admin/mute         コメントのミュート {"device","on"}(ミュート中の端末のコメントは記録しない)
   POST /api/admin/logout
 
 ブラウザからは MAC アドレスや端末名は取れないため、ページが端末ごとに作る
@@ -34,6 +35,7 @@ PORT = int(os.environ.get("YOBS_API_PORT", "8897"))
 
 COUNT_WINDOW = 8            # 秒: この間に映像を取りに来た人を視聴中とみなす
 ONLINE_WINDOW = 90          # 秒: この間に挨拶が来た端末を「アクセス中」とみなす
+TAB_WINDOW = 45             # 秒: この間に挨拶が来たタブを「表示中」とみなす(挨拶は30秒ごと)
 FAIL_WINDOW = 3600          # 1時間
 FAIL_LIMIT = 3
 TOKEN_TTL = 12 * 3600
@@ -89,7 +91,9 @@ def load_comments():
 
 
 comments = load_comments()
-stream = load_json("stream.json", {"title": ""})   # 配信タイトル(配信終了でリセット)
+stream = load_json("stream.json", {"title": ""})
+mutes = load_json("mutes.json", {"devices": {}, "keys": {}})   # コメントのミュート
+   # 配信タイトル(配信終了でリセット)
 TITLE_MAX = 60
 
 
@@ -143,6 +147,14 @@ def device_label(ua):
 def clean(s, n):
     s = str(s or "").replace("\r", " ").replace("\n", " ").strip()
     return s[:n]
+
+
+def mute_key(ip, hw):
+    return f"{ip}|{hw}" if hw else ""
+
+
+def is_muted(device, ip, hw):
+    return (device and device in mutes["devices"]) or (mute_key(ip, hw) in mutes["keys"])
 
 
 def is_banned(device, ip):
@@ -291,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
                     g = groups.setdefault(key, {
                         "key": (c.get("hw") or dev)[:8], "ip": c["ip"], "names": [], "os": c["label"].split(" / ")[0],
                         "browsers": [], "devices": [], "last": 0, "viewing": False, "ua": c["ua"],
+                        "tabs": 0, "tab_detail": {}, "items": [], "first": c.get("first", now),
                     })
                     if c["name"] and c["name"] not in g["names"]:
                         g["names"].append(c["name"])
@@ -298,6 +311,16 @@ class Handler(BaseHTTPRequestHandler):
                     if br not in g["browsers"]:
                         g["browsers"].append(br)
                     g["devices"].append(dev[:8])
+                    n_tabs = sum(1 for ts in c.get("tabs", {}).values() if now - ts <= TAB_WINDOW)
+                    g["first"] = min(g["first"], c.get("first", now))
+                    g["items"].append({
+                        "device": dev, "browser": br, "label": c["label"], "name": c["name"], "ua": c["ua"],
+                        "tabs": n_tabs, "first": c.get("first", now), "last": c["last"], "viewing": c["viewing"],
+                        "muted": bool(is_muted(dev, c["ip"], c.get("hw"))),
+                    })
+                    if n_tabs:
+                        g["tabs"] += n_tabs
+                        g["tab_detail"][br] = g["tab_detail"].get(br, 0) + n_tabs
                     g["last"] = max(g["last"], c["last"])
                     g["viewing"] = g["viewing"] or c["viewing"]
                 online = []
@@ -307,7 +330,9 @@ class Handler(BaseHTTPRequestHandler):
                 online.sort(key=lambda c: c["last"], reverse=True)
                 data = {
                     "clients": online,
-                    "comments": list(reversed(comments[-300:])),
+                    "comments": [dict(c, muted=bool(is_muted(c.get("device"), c.get("ip"), c.get("hw"))))
+                                 for c in reversed(comments[-300:])],
+                    "mutes": sorted(mutes["devices"].values(), key=lambda m: m["ts"], reverse=True),
                     "bans": {"devices": len(bans["devices"]), "ips": len(bans["ips"])},
                     "count": count_snapshot(),
                     "title": stream.get("title", ""),
@@ -330,14 +355,27 @@ class Handler(BaseHTTPRequestHandler):
                 if device:
                     ua = clean(self.headers.get("User-Agent"), 300)
                     prev = clients.get(device, {})
+                    tabs = {t: ts for t, ts in prev.get("tabs", {}).items() if now - ts <= TAB_WINDOW}
+                    tab = clean(d.get("tab"), 32)
+                    if tab:
+                        tabs[tab] = now
                     name = clean(d.get("name"), NAME_MAX) or prev.get("name", "") or names.get(device, {}).get("name", "")
                     clients[device] = {
                         "name": name, "ip": ip, "ua": ua, "label": device_label(ua),
                         "hw": clean(d.get("hw"), 16),
                         "first": prev.get("first", now), "last": now,
                         "viewing": bool(d.get("viewing")),
+                        "tabs": tabs,
                     }
             return self.send_json(200, {"banned": False})
+
+        if p == "/api/bye":
+            # タブを閉じた・移動した時の通知(表示数をすぐ減らす)
+            with lock:
+                c = clients.get(device)
+                if c:
+                    c.get("tabs", {}).pop(clean(d.get("tab"), 32), None)
+            return self.send_json(200, {"ok": True})
 
         if p == "/api/comment":
             with lock:
@@ -350,6 +388,10 @@ class Handler(BaseHTTPRequestHandler):
                 if now - last_comment.get(device, 0) < COMMENT_INTERVAL:
                     return self.send_json(429, {"error": "少し待ってから送ってください"})
                 last_comment[device] = now
+                hw = clean(d.get("hw"), 16)
+                if is_muted(device, ip, hw):
+                    # ミュート中の端末: 送った側には成功に見せて、記録しない
+                    return self.send_json(200, {"ok": True})
                 ua = clean(self.headers.get("User-Agent"), 300)
                 label = device_label(ua)
                 append_comment({"ts": now, "name": name, "text": text,
@@ -394,6 +436,29 @@ class Handler(BaseHTTPRequestHandler):
                 save_json("stream.json", stream)
                 _count_cache["data"] = None
             return self.send_json(200, {"ok": True, "title": stream["title"]})
+
+        if p == "/api/admin/mute":
+            with lock:
+                if not valid_token(self.token()):
+                    return self.send_json(401, {"error": "ログインしてください"})
+                dev = clean(d.get("device"), 64)
+                if not dev:
+                    return self.send_json(400, {"error": "端末が指定されていません"})
+                if d.get("on"):
+                    # その端末(ブラウザ)と、同じ IP+端末キー(同じスマホの別ブラウザ)をミュート
+                    src = next((c for c in reversed(comments) if c.get("device") == dev), {})
+                    key = mute_key(src.get("ip", ""), src.get("hw", ""))
+                    rec = {"ts": now, "device": dev, "key": key, "name": src.get("name", ""),
+                           "label": src.get("label", ""), "ip": src.get("ip", "")}
+                    mutes["devices"][dev] = rec
+                    if key:
+                        mutes["keys"][key] = rec
+                else:
+                    rec = mutes["devices"].pop(dev, None) or {}
+                    if rec.get("key"):
+                        mutes["keys"].pop(rec["key"], None)
+                save_json("mutes.json", mutes)
+            return self.send_json(200, {"ok": True})
 
         if p == "/api/admin/logout":
             with lock:

@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102001613';
+  window.YOBS_VERSION = '20261102002519';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -113,13 +113,27 @@
   .modal-box h2 { margin: 0; font-size: 18px; text-align: center; }
   .modal input { font-size: 22px; text-align: center; letter-spacing: .3em; }
   .loginmsg { margin: 0; min-height: 18px; font-size: 13px; color: var(--ng); text-align: center; }
+  .detail-box { max-width: 560px; max-height: 85vh; display: flex; flex-direction: column; }
+  .detail-body { overflow: auto; display: grid; gap: 10px; }
+  .dl { display: grid; grid-template-columns: 7.5em 1fr; gap: 4px 10px; margin: 0; font-size: 13px; }
+  .dl dt { color: var(--sub); }
+  .dl dd { margin: 0; word-break: break-all; }
+  .dl dd.mono { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+  .dcard { border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+  .dcard-h { font-weight: 700; margin-bottom: 6px; color: var(--accent); }
   .ban { position: fixed; inset: 0; z-index: 30; background: #0b0910; display: flex; align-items: center; justify-content: center; text-align: center; }
   .ban-icon { font-size: 64px; }
   .ban-main { font-size: 20px; font-weight: 800; }
   /* 管理画面: 左に通常画面、右に管理画面 */
   /* 管理画面: 左=通常画面 / 中=管理 / 右=コメント */
-  body.admin-on .layout { display: grid; grid-template-columns: minmax(0, 480px) minmax(0, 1fr) minmax(0, 1fr); gap: 16px; max-width: 1700px; margin: 0 auto; }
-  @media (max-width: 1150px) { body.admin-on .layout { grid-template-columns: minmax(0, 440px) minmax(0, 1fr); }
+  body.admin-on .layout { display: grid; grid-template-columns: minmax(0, 340px) minmax(0, 1.4fr) minmax(0, 1fr); gap: 14px; max-width: 1800px; margin: 0 auto; }
+  @media (max-width: 1440px) { body.admin-on .layout { grid-template-columns: minmax(0, 290px) minmax(0, 1.45fr) minmax(0, 1fr); } }
+  /* 管理画面中は左の視聴画面をコンパクトに */
+  body.admin-on .wrap .primary { font-size: 15px; padding: 14px 8px; }
+  body.admin-on .wrap .row2 button { font-size: 13px; padding: 10px 4px; }
+  body.admin-on .wrap .stitle { font-size: 15px; padding: 8px 10px; }
+  body.admin-on .wrap .openbox, body.admin-on .wrap .volios { display: none; }
+  @media (max-width: 1100px) { body.admin-on .layout { grid-template-columns: minmax(0, 290px) minmax(0, 1fr); }
     body.admin-on #adminComments { grid-column: 2; } body.admin-on .layout .wrap { grid-row: span 2; }
     body.admin-on .admin { height: auto; position: static; } body.admin-on .comments { max-height: 60vh; } }
   body.admin-on .wrap { margin: 0; width: 100%; }
@@ -136,7 +150,9 @@
   .note { font-size: 11px; line-height: 1.5; margin: 0 0 8px; }
   .tablewrap { overflow: auto; flex: 1; min-height: 120px; border: 1px solid var(--line); border-radius: 10px; }
   table.clients { width: 100%; border-collapse: collapse; font-size: 12px; }
-  table.clients th, table.clients td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  table.clients th, table.clients td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  table.clients td.wrap { white-space: normal; word-break: break-all; min-width: 4em; }
+  table.clients td.multi { color: var(--warn); font-weight: 700; }
   table.clients th { position: sticky; top: 0; background: #2a2338; font-weight: 600; }
   table.clients td.mono, .c-meta .mono { font-family: ui-monospace, Menlo, Consolas, monospace; }
   .comments { flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; min-height: 200px; }
@@ -144,6 +160,13 @@
   .c-item.new { animation: flash 1.5s ease-out; }
   @keyframes flash { from { background: rgba(255,111,174,.25); } to { background: transparent; } }
   .c-head { display: flex; gap: 8px; align-items: baseline; }
+  .c-mute { margin-left: auto; font-size: 11px; padding: 4px 8px; border-radius: 8px; background: #2a2338; border: 1px solid var(--line); font-weight: 600; }
+  .c-mute.on { background: var(--ng); border-color: var(--ng); }
+  .c-item.muted { opacity: .45; }
+  .c-tag { font-size: 10px; background: var(--ng); color: #fff; border-radius: 6px; padding: 1px 6px; }
+  .mutelist { display: grid; gap: 6px; max-height: 20vh; overflow: auto; }
+  .mute-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; }
+  .mute-row .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .c-name { font-weight: 700; color: var(--accent); }
   .c-time { font-size: 11px; color: var(--sub); }
   .c-text { margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
@@ -226,10 +249,15 @@
     <p class="muted note">※ブラウザからはMACアドレス・端末名を取得できないため、「同じIP+同じ端末キー(画面・GPUなどから作成)」を1台として表示しています。同じ回線の同じ機種は1台にまとまることがあります。ミニプレイヤーで裏に回っている端末は表示が消えることがあります。</p>
     <div class="tablewrap">
       <table class="clients">
-        <thead><tr><th>名前</th><th>端末</th><th>ブラウザ</th><th>端末キー</th><th>IP</th><th>状態</th></tr></thead>
+        <thead><tr><th>名前</th><th>端末</th><th>表示数</th><th>状態</th><th></th></tr></thead>
         <tbody id="clientRows"></tbody>
       </table>
     </div>
+  </section>
+  <section class="admin-sec">
+    <h3>ミュート中 <span id="muteCount" class="badge">0</span>
+      <small class="muted">この端末からのコメントは記録されません</small></h3>
+    <div id="muteList" class="mutelist"></div>
   </section>
 </aside>
 
@@ -250,6 +278,14 @@
       <button id="loginCancel" class="secondary">キャンセル</button>
       <button id="loginGo" class="primary small">ログイン</button>
     </div>
+  </div>
+</div>
+
+<div id="detailModal" class="modal" hidden>
+  <div class="modal-box detail-box">
+    <h2>端末の詳細</h2>
+    <div id="detailBody" class="detail-body"></div>
+    <button id="detailClose" class="secondary">閉じる</button>
   </div>
 </div>
 
@@ -681,6 +717,11 @@
     store.set('yobs.device', device);
   }
   $('cName').value = store.get('yobs.name');
+  // タブごとの番号(同じ端末で何画面開いているか数えるため。読み込みのたびに新しくなる)
+  const tab = Math.random().toString(36).slice(2, 12);
+  window.addEventListener('pagehide', () => {
+    try { navigator.sendBeacon(API + '/bye', JSON.stringify({ device, tab })); } catch {}
+  });
 
   // ---- 端末キー: ブラウザが違っても同じになる情報(画面・GPU・CPU数・タイムゾーン)から作る ----
   let hw = '';
@@ -722,7 +763,7 @@
     await hwReady;
     try {
       const v = $('video');
-      const r = await post('/hello', { device, hw, name: store.get('yobs.name'), viewing: !!(v && !v.paused) });
+      const r = await post('/hello', { device, hw, tab, name: store.get('yobs.name'), viewing: !!(v && !v.paused) });
       if (r.data && r.data.banned) showBan();
     } catch {}
   }
@@ -808,7 +849,27 @@
   }
 
   // ---- 管理画面 ----
-  let adminTimer = null, lastTopTs = 0;
+  let adminTimer = null, lastTopTs = 0, lastMuteSig = '';
+
+  // ---- ミュート ----
+  async function setMute(dev, on, name) {
+    if (on && !confirm(`「${name || '名無し'}」の端末をミュートしますか?\nこの端末からのコメントは記録されなくなります。`)) return;
+    try { await post('/admin/mute', { device: dev, on }, token); } catch {}
+    refresh();
+  }
+  function renderMutes(ms) {
+    $('muteCount').textContent = ms.length;
+    const box = $('muteList');
+    box.textContent = '';
+    if (!ms.length) { box.append(el('div', 'muted note', 'ミュート中の端末はありません')); return; }
+    for (const m of ms) {
+      const row = el('div', 'mute-row');
+      const b = el('button', 'c-mute', '解除');
+      b.addEventListener('click', () => setMute(m.device, false));
+      row.append(el('span', 'grow', `${m.name || '名無し'}  ${m.label || ''}  ${m.ip || ''}`), b);
+      box.append(row);
+    }
+  }
   function startAdmin() {
     document.body.classList.add('admin-on');
     $('admin').hidden = false;
@@ -851,6 +912,50 @@
   const fmtDate = (ts) => new Date(ts * 1000).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 
+  // 表示数: 1 画面なら「1」、複数なら「3(Safari×2, LINE内ブラウザ×1)」
+  function tabCell(c) {
+    const n = c.tabs || 0;
+    const td = el('td', 'wrap' + (n > 1 ? ' multi' : ''));
+    const parts = Object.entries(c.tab_detail || {}).map(([b, k]) => `${b}×${k}`);
+    td.textContent = n > 1 ? `${n}(${parts.join(', ')})` : String(n || '—');
+    return td;
+  }
+
+  // ---- 端末の詳細ポップアップ ----
+  function openDetail(c) {
+    const box = $('detailBody');
+    box.textContent = '';
+    const dl = el('dl', 'dl');
+    const add = (k, v, mono) => { dl.append(el('dt', '', k)); dl.append(el('dd', mono ? 'mono' : '', v)); };
+    add('名前', c.names.join(', ') || '—');
+    add('端末', c.os);
+    add('ブラウザ', c.browsers.join(', '));
+    add('IPアドレス', c.ip, true);
+    add('端末キー', c.key, true);
+    add('表示数', String(c.tabs || 0));
+    add('最初のアクセス', fmtDate(c.first));
+    add('最後の通信', `${c.ago}秒前`);
+    box.append(dl);
+    for (const it of c.items) {
+      const card = el('div', 'dcard');
+      card.append(el('div', 'dcard-h', `${it.browser}${it.muted ? '(ミュート中)' : ''}`));
+      const d2 = el('dl', 'dl');
+      const add2 = (k, v, mono) => { d2.append(el('dt', '', k)); d2.append(el('dd', mono ? 'mono' : '', v)); };
+      add2('ブラウザID', it.device, true);
+      add2('名前', it.name || '—');
+      add2('表示数', String(it.tabs));
+      add2('状態', it.viewing ? '視聴中' : '表示中');
+      add2('最初', fmtDate(it.first));
+      add2('ブラウザ情報', it.ua, true);
+      card.append(d2);
+      box.append(card);
+    }
+    box.append(el('p', 'muted note', '※MACアドレス・端末名はブラウザから取得できないため表示できません。'));
+    $('detailModal').hidden = false;
+  }
+  $('detailClose').addEventListener('click', () => { $('detailModal').hidden = true; });
+  $('detailModal').addEventListener('click', (e) => { if (e.target === $('detailModal')) $('detailModal').hidden = true; });
+
   async function refresh() {
     if (!token) return;
     let d;
@@ -870,15 +975,16 @@
     rows.textContent = '';
     for (const c of d.clients) {
       const tr = el('tr');
+      const detail = el('button', 'c-mute', '詳細');
+      detail.addEventListener('click', () => openDetail(c));
+      const tdBtn = el('td'); tdBtn.append(detail);
       tr.append(
-        el('td', '', c.names.join(', ') || '—'),
+        el('td', 'wrap', c.names.join(', ') || '—'),
         el('td', '', c.os),
-        el('td', '', c.browsers.join(', ')),
-        el('td', 'mono', c.key),
-        el('td', 'mono', c.ip),
+        tabCell(c),
         el('td', '', c.ago <= 35 ? (c.viewing ? '視聴中' : '表示中') : `${c.ago}秒前`),
+        tdBtn,
       );
-      tr.title = 'ブラウザごとのID: ' + c.devices.join(', ');
       rows.append(tr);
     }
 
@@ -886,13 +992,22 @@
     $('commentCount').textContent = d.comments.length;
     const list = $('commentList');
     const topTs = d.comments.length ? d.comments[0].ts : 0;
-    if (topTs !== lastTopTs) {
+    const muteSig = (d.mutes || []).map((m) => m.device).join(',');
+    renderMutes(d.mutes || []);
+    if (topTs !== lastTopTs || muteSig !== lastMuteSig) {
       const isFirst = lastTopTs === 0;
+      const onlyMute = topTs === lastTopTs;
+      lastMuteSig = muteSig;
+      const keepScroll = list.scrollTop;
       list.textContent = '';
       for (const c of d.comments) {
-        const item = el('div', 'c-item' + (!isFirst && c.ts > lastTopTs ? ' new' : ''));
+        const item = el('div', 'c-item' + (!isFirst && c.ts > lastTopTs ? ' new' : '') + (c.muted ? ' muted' : ''));
         const head = el('div', 'c-head');
         head.append(el('span', 'c-name', c.name), el('span', 'c-time', fmtDate(c.ts)));
+        if (c.muted) head.append(el('span', 'c-tag', 'ミュート中'));
+        const mb = el('button', 'c-mute' + (c.muted ? ' on' : ''), c.muted ? 'ミュート解除' : '🔇 ミュート');
+        mb.addEventListener('click', () => setMute(c.device, !c.muted, c.name));
+        head.append(mb);
         const meta = el('div', 'c-meta');
         meta.append(document.createTextNode(c.label + ' / 端末キー '), el('span', 'mono', (c.hw || c.device).slice(0, 8)),
           document.createTextNode(' / IP '), el('span', 'mono', c.ip));
@@ -900,7 +1015,8 @@
         list.append(item);
       }
       lastTopTs = topTs;
-      list.scrollTo({ top: 0, behavior: isFirst ? 'auto' : 'smooth' });  // 新しいコメントへ自動スクロール
+      if (onlyMute) list.scrollTop = keepScroll;   // ミュート操作だけならスクロール位置はそのまま
+      else list.scrollTo({ top: 0, behavior: isFirst ? 'auto' : 'smooth' });  // 新しいコメントへ自動スクロール
     }
   }
 
