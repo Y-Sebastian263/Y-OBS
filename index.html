@@ -39,6 +39,15 @@
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row2 button { padding: 14px 6px; font-size: 15px; }
   .wide { width: 100%; }
+  .homehint { position: fixed; inset: 0; z-index: 10; background: rgba(10,8,16,.92);
+    display: flex; align-items: flex-end; justify-content: center; padding: 24px 20px max(40px, env(safe-area-inset-bottom)); }
+  .homehint-box { text-align: center; width: 100%; max-width: 420px; }
+  .homehint-box p { margin: 6px 0; color: var(--sub); }
+  .homehint-main { font-size: 22px; font-weight: 800; color: var(--text) !important; line-height: 1.5; }
+  .homehint-sub { font-size: 12px; }
+  .homehint-arrow { font-size: 56px; animation: up 1.2s ease-in-out infinite; }
+  .homehint-box button { margin-top: 18px; width: 100%; }
+  @keyframes up { 0%,100% { transform: translateY(8px); opacity: .6; } 50% { transform: translateY(-8px); opacity: 1; } }
   .volrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px;
     background: var(--panel); border: 1px solid var(--line); }
   .vollabel { font-size: 14px; font-weight: 600; white-space: nowrap; }
@@ -94,6 +103,16 @@
       <button id="openIos" class="os">iPhone<br><small>Safariで開く</small></button>
       <button id="openAndroid" class="os">Android<br><small>Chromeで開く</small></button>
     </div>
+  </div>
+</div>
+
+<div id="homeHint" class="homehint" hidden>
+  <div class="homehint-box">
+    <div class="homehint-arrow">⬆</div>
+    <p>ミニプレイヤーになりました</p>
+    <p class="homehint-main">画面の一番下から<br>上にスワイプしてホーム画面へ</p>
+    <p class="homehint-sub">(ホームボタンがある機種はホームボタンを押す)</p>
+    <button id="homeHintClose" class="secondary">閉じる</button>
   </div>
 </div>
 
@@ -356,13 +375,21 @@
     location.href = returnUrl();
   }
 
+  // 「ミニプレイヤーだけ」の後はホーム画面へ。
+  // Android(Chrome)はミニプレイヤーになると自動でホーム側に戻る。
+  // iPhone はページからホームへ戻せないので、スワイプの案内を出す。
+  let wantHome = false;
   function onPipEntered() {
     $('goReality').textContent = 'REALITYを開く';
     if (wantReturn) setTimeout(openReality, 150);
+    if (wantHome && isIOS) $('homeHint').hidden = false;
+    wantHome = false;
   }
   function onPipLeft() {
     $('goReality').textContent = 'ミニプレイヤーにしてREALITYへ戻る';
+    $('homeHint').hidden = true;
   }
+  $('homeHintClose').addEventListener('click', () => { $('homeHint').hidden = true; });
   video.addEventListener('enterpictureinpicture', onPipEntered);
   video.addEventListener('leavepictureinpicture', onPipLeft);
   video.addEventListener('webkitpresentationmodechanged', () => inPip() ? onPipEntered() : onPipLeft());
@@ -389,8 +416,9 @@
   $('pipOnly').addEventListener('click', () => {
     say('');
     wantReturn = false;
+    wantHome = true;
     applySound();
-    enterPip().catch((e) => say(e.message));
+    enterPip().catch((e) => { wantHome = false; say(e.message); });
   });
 
   $('sound').addEventListener('click', () => {
