@@ -68,6 +68,10 @@ rm -rf "$TMP"
 cat > "$CONF_DIR/mediamtx.yml" <<EOF
 logLevel: info
 
+# 視聴人数カウンター用(このサーバー内からだけ)
+api: yes
+apiAddress: 127.0.0.1:9997
+
 # OBS からの受け口(パスワード必須)
 rtmp: yes
 rtmpAddress: :1935
@@ -147,13 +151,25 @@ cat >> "$CADDYFILE" <<EOF
 ${BEGIN_MARK}
 # 視聴(HLS)と低遅延(WebRTC)はアドレスを分けて、パスを書き換えずにそのまま中継する
 hls.${HOST} {
+	log {
+		output file /var/log/caddy/y-obs-hls.log {
+			roll_size 10MiB
+			roll_keep 2
+		}
+		format json
+	}
 	reverse_proxy 127.0.0.1:8888
 }
 rtc.${HOST} {
 	reverse_proxy 127.0.0.1:8889
 }
 ${HOST} {
-	respond "Y-OBS server OK" 200
+	handle /count {
+		reverse_proxy 127.0.0.1:8897
+	}
+	handle {
+		respond "Y-OBS server OK" 200
+	}
 }
 ${END_MARK}
 EOF
@@ -163,6 +179,27 @@ if ! caddy validate --config "$CADDYFILE" --adapter caddyfile >/tmp/y-obs-caddy-
   tail -n 20 /tmp/y-obs-caddy-validate.log >&2
   exit 1
 fi
+
+echo "==> 同時視聴人数カウンター"
+mkdir -p /var/log/caddy /usr/local/lib/y-obs
+chown caddy:caddy /var/log/caddy
+curl -fsSL "https://raw.githubusercontent.com/Y-Sebastian263/Y-OBS/${YOBS_REF:-main}/server/viewer-count.py" \
+  -o /usr/local/lib/y-obs/viewer-count.py
+chmod 755 /usr/local/lib/y-obs/viewer-count.py
+cat > /etc/systemd/system/y-obs-count.service <<EOF
+[Unit]
+Description=Y-OBS viewer counter
+After=network-online.target
+
+[Service]
+User=caddy
+ExecStart=/usr/bin/python3 /usr/local/lib/y-obs/viewer-count.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 echo "==> ファイアウォール"
 if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
@@ -176,6 +213,8 @@ echo "==> 起動"
 systemctl daemon-reload
 systemctl enable --now y-obs-mediamtx >/dev/null
 systemctl restart y-obs-mediamtx
+systemctl enable --now y-obs-count >/dev/null
+systemctl restart y-obs-count
 systemctl enable caddy >/dev/null
 if systemctl is-active --quiet caddy; then systemctl reload caddy; else systemctl start caddy; fi
 
@@ -185,6 +224,7 @@ OBS サーバー    : rtmp://${IP}:1935
 OBS 送信パスワード: ${PASS}
 視聴 HLS       : https://hls.${HOST}/live/index.m3u8
 視聴 WebRTC    : https://rtc.${HOST}/live/whep
+視聴人数       : https://${HOST}/count
 EOF
 chmod 600 "$CONF_DIR/info.txt"
 

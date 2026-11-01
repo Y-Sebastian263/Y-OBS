@@ -3,6 +3,8 @@ window.YOBS_CONFIG = {
   // 配信サーバーの映像の場所(VPSのセットアップ後に設定)
   hlsUrl: 'https://hls.153-127-64-17.sslip.io/live/index.m3u8',
   rtcUrl: 'https://rtc.153-127-64-17.sslip.io/live/whep',
+  // 同時視聴人数
+  countUrl: 'https://153-127-64-17.sslip.io/count',
   // 「REALITYへ戻る」で開くURL
   returnUrl: 'https://reality.app/',
   // Android 版 REALITY のパッケージ名

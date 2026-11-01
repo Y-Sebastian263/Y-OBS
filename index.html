@@ -20,6 +20,7 @@
   h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
   .pill { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: var(--panel);
     border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 6px; }
+  .pills { display: flex; gap: 6px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sub); }
   .pill.live .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .pill.wait .dot { background: var(--warn); }
@@ -73,7 +74,10 @@
 <div class="wrap">
   <header>
     <h1>Y-OBS ミニプレイヤー</h1>
-    <span id="status" class="pill"><span class="dot"></span><span id="statusText">準備中</span></span>
+    <div class="pills">
+      <span id="viewers" class="pill" hidden>👀 <span id="viewersText">0</span>人</span>
+      <span id="status" class="pill"><span class="dot"></span><span id="statusText">準備中</span></span>
+    </div>
   </header>
 
   <div class="screen">
@@ -465,6 +469,23 @@
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && src && video.paused) video.play().catch(() => {});
   });
+
+  // ---- 同時視聴人数 ----
+  const countUrl = CONFIG.countUrl || '';
+  async function updateViewers() {
+    if (!countUrl || document.visibilityState !== 'visible') return;
+    try {
+      const r = await fetch(countUrl, { cache: 'no-store' });
+      const d = await r.json();
+      $('viewersText').textContent = d.viewers;
+      $('viewers').hidden = !d.live;
+    } catch { /* 取れない時は表示を変えない */ }
+  }
+  if (countUrl) {
+    updateViewers();
+    setInterval(updateViewers, 10000);
+    document.addEventListener('visibilitychange', updateViewers);
+  }
 
   startPlayer();
 })();
