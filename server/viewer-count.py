@@ -18,9 +18,9 @@ LOG = os.environ.get("YOBS_HLS_LOG", "/var/log/caddy/y-obs-hls.log")
 API = os.environ.get("YOBS_API", "http://127.0.0.1:9997")
 STREAM = os.environ.get("YOBS_STREAM", "live")
 PORT = int(os.environ.get("YOBS_COUNT_PORT", "8897"))
-WINDOW = 20          # 秒: この間に映像を取りに来た人を「視聴中」とみなす
+WINDOW = 8           # 秒: この間に映像を取りに来た人を「視聴中」とみなす
 TAIL_BYTES = 3_000_000
-CACHE_SEC = 3
+CACHE_SEC = 1
 
 _cache = {"t": 0.0, "data": None}
 
@@ -69,7 +69,7 @@ def count_webrtc():
     data = api_get("/v3/webrtcsessions/list?itemsPerPage=1000") or {}
     n = 0
     for s in data.get("items", []):
-        if s.get("path") == STREAM and s.get("state") == "read":
+        if s.get("path") == STREAM and s.get("state") != "publish":
             n += 1
     return n
 
