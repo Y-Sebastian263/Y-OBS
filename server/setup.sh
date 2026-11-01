@@ -77,6 +77,8 @@ rtmp: yes
 rtmpAddress: :1935
 rtsp: no
 srt: no
+# 使わない機能は外から待ち受けない
+moq: no
 
 # 視聴: HLS(iPhone など)。https は Caddy 経由
 hls: yes
