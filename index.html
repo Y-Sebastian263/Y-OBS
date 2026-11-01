@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102000728';
+  window.YOBS_VERSION = '20261102001305';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -100,6 +100,12 @@
   .namerow { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
   .namebtn { padding: 0 18px; font-size: 15px; border-radius: 10px; }
   .namemsg { margin: 0; font-size: 12px; color: var(--ok); text-align: center; }
+  .stitle { margin: 0 0 10px; font-size: 18px; font-weight: 800; line-height: 1.4; word-break: break-word;
+    padding: 10px 14px; border-radius: 12px; background: linear-gradient(135deg, rgba(255,111,174,.18), rgba(124,92,255,.18));
+    border: 1px solid var(--line); }
+  .titlerow { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; }
+  .titlerow input { padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 15px; font-family: inherit; min-width: 0; }
+  .titlemsg { margin: 6px 0 0; font-size: 12px; color: var(--sub); min-height: 16px; }
   .cnote { margin: 0; font-size: 12px; color: var(--sub); text-align: center; }
   .cmsg { margin: 0; min-height: 16px; font-size: 12px; color: var(--sub); text-align: center; }
   .modal { position: fixed; inset: 0; z-index: 20; background: rgba(10,8,16,.85); display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -151,6 +157,7 @@
     </div>
   </header>
 
+  <h2 id="streamTitle" class="stitle" hidden></h2>
   <div class="screen">
     <video id="video" muted playsinline webkit-playsinline autoplay></video>
     <div id="overlay" class="overlay">準備中です。</div>
@@ -200,6 +207,15 @@
     <h2>管理画面</h2>
     <button id="adminLogout" class="secondary small">ログアウト</button>
   </div>
+  <section class="admin-sec">
+    <h3>配信タイトル</h3>
+    <div class="titlerow">
+      <input id="titleInput" maxlength="60" placeholder="配信タイトルを入力">
+      <button id="titleSave" class="primary small">設定</button>
+      <button id="titleClear" class="secondary small">消す</button>
+    </div>
+    <p id="titleMsg" class="titlemsg">配信中だけ視聴ページの上に表示されます。OBSの配信終了で自動的に消えます。</p>
+  </section>
   <section class="admin-sec">
     <h3>アクセス中の端末 <span id="clientCount" class="badge">0</span>
       <small id="countDetail" class="muted"></small></h3>
@@ -625,6 +641,9 @@
       const d = await r.json();
       $('viewersText').textContent = d.viewers;
       $('viewers').hidden = !d.live;
+      const t = d.live ? (d.title || '') : '';
+      if ($('streamTitle').textContent !== t) $('streamTitle').textContent = t;
+      $('streamTitle').hidden = !t;
     } catch { /* 取れない時は表示を変えない */ }
   }
   if (countUrl) {
@@ -802,6 +821,23 @@
     stopAdmin();
   });
 
+  // ---- 配信タイトル ----
+  let titleEditing = false;
+  $('titleInput').addEventListener('focus', () => { titleEditing = true; });
+  $('titleInput').addEventListener('blur', () => { titleEditing = false; });
+  async function setTitle(title) {
+    const r = await post('/admin/title', { title }, token).catch(() => null);
+    if (r && r.ok) {
+      $('titleInput').value = r.data.title;
+      $('titleMsg').textContent = r.data.title ? '設定しました(配信中だけ表示されます)' : 'タイトルを消しました';
+    } else {
+      $('titleMsg').textContent = '設定できませんでした';
+    }
+  }
+  $('titleSave').addEventListener('click', () => setTitle($('titleInput').value.trim()));
+  $('titleClear').addEventListener('click', () => setTitle(''));
+  $('titleInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') setTitle($('titleInput').value.trim()); });
+
   const fmtTime = (ts) => new Date(ts * 1000).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const fmtDate = (ts) => new Date(ts * 1000).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -814,6 +850,9 @@
       if (r.status === 401) { stopAdmin(); return; }
       d = await r.json();
     } catch { return; }
+
+    // 配信タイトル(入力中は上書きしない)
+    if (!titleEditing && $('titleInput').value !== (d.title || '')) $('titleInput').value = d.title || '';
 
     // 端末一覧
     $('clientCount').textContent = d.clients.length;

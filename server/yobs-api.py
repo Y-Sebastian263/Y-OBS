@@ -8,6 +8,7 @@ Caddy 経由で https://<host>/count と https://<host>/api/... に公開され�
   POST /api/comment           コメント送信 {"device","name","text"}
   POST /api/login             管理ログイン {"device","pin"} → {"token"}
   GET  /api/admin/state       管理画面のデータ(Authorization: Bearer <token>)
+  POST /api/admin/title        配信タイトルを設定(配信終了で自動リセット)
   POST /api/admin/logout
 
 ブラウザからは MAC アドレスや端末名は取れないため、ページが端末ごとに作る
@@ -88,6 +89,8 @@ def load_comments():
 
 
 comments = load_comments()
+stream = load_json("stream.json", {"title": ""})   # 配信タイトル(配信終了でリセット)
+TITLE_MAX = 60
 
 
 def append_comment(c):
@@ -196,9 +199,25 @@ def count_snapshot():
         return _count_cache["data"]
     hls, rtc = count_hls(now), count_webrtc()
     live = bool((api_get(f"/v3/paths/get/{STREAM}") or {}).get("ready"))
-    data = {"viewers": hls + rtc, "hls": hls, "webrtc": rtc, "live": live}
+    data = {"viewers": hls + rtc, "hls": hls, "webrtc": rtc, "live": live,
+            "title": stream.get("title", "") if live else ""}
     _count_cache.update(t=now, data=data)
     return data
+
+
+# ---------------------------------------------------------------- 配信の終了を見張る
+def watch_stream():
+    """配信中→配信終了になった瞬間に、配信タイトルをリセットする"""
+    was_live = False
+    while True:
+        live = bool((api_get(f"/v3/paths/get/{STREAM}") or {}).get("ready"))
+        if was_live and not live:
+            with lock:
+                stream["title"] = ""
+                save_json("stream.json", stream)
+                _count_cache["data"] = None
+        was_live = live
+        time.sleep(1)
 
 
 # ---------------------------------------------------------------- 暗証番号
@@ -291,6 +310,7 @@ class Handler(BaseHTTPRequestHandler):
                     "comments": list(reversed(comments[-300:])),
                     "bans": {"devices": len(bans["devices"]), "ips": len(bans["ips"])},
                     "count": count_snapshot(),
+                    "title": stream.get("title", ""),
                     "now": now,
                 }
             return self.send_json(200, data)
@@ -366,6 +386,15 @@ class Handler(BaseHTTPRequestHandler):
                 left = FAIL_LIMIT - max(n_dev, n_ip)
                 return self.send_json(401, {"error": f"番号が違います(あと{left}回間違えると禁止されます)"})
 
+        if p == "/api/admin/title":
+            with lock:
+                if not valid_token(self.token()):
+                    return self.send_json(401, {"error": "ログインしてください"})
+                stream["title"] = clean(d.get("title"), TITLE_MAX)
+                save_json("stream.json", stream)
+                _count_cache["data"] = None
+            return self.send_json(200, {"ok": True, "title": stream["title"]})
+
         if p == "/api/admin/logout":
             with lock:
                 tokens.pop(self.token(), None)
@@ -379,4 +408,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     os.makedirs(DATA, exist_ok=True)
+    threading.Thread(target=watch_stream, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
