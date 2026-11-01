@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102000226';
+  window.YOBS_VERSION = '20261102000434';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -97,6 +97,7 @@
     background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit; resize: vertical; }
   .primary.small { font-size: 16px; padding: 14px; }
   .secondary.small { font-size: 13px; padding: 8px 12px; border-radius: 10px; }
+  .cnote { margin: 0; font-size: 12px; color: var(--sub); text-align: center; }
   .cmsg { margin: 0; min-height: 16px; font-size: 12px; color: var(--sub); text-align: center; }
   .modal { position: fixed; inset: 0; z-index: 20; background: rgba(10,8,16,.85); display: flex; align-items: center; justify-content: center; padding: 20px; }
   .modal-box { width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; display: grid; gap: 12px; }
@@ -165,6 +166,7 @@
       <input id="cName" class="cname" maxlength="30" placeholder="名前">
       <textarea id="cText" rows="2" maxlength="300" placeholder="コメントを入力"></textarea>
       <button id="cSend" type="submit" class="primary small">コメント送信</button>
+      <p class="cnote">🔒 コメントは配信者のみに送信されます。</p>
       <p id="cMsg" class="cmsg"></p>
     </form>
     <div id="volRow" class="volrow">
