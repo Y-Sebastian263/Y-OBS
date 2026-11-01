@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102000434';
+  window.YOBS_VERSION = '20261102000728';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -97,6 +97,9 @@
     background: var(--bg); color: var(--text); font-size: 16px; font-family: inherit; resize: vertical; }
   .primary.small { font-size: 16px; padding: 14px; }
   .secondary.small { font-size: 13px; padding: 8px 12px; border-radius: 10px; }
+  .namerow { display: grid; grid-template-columns: auto 1fr; gap: 8px; }
+  .namebtn { padding: 0 18px; font-size: 15px; border-radius: 10px; }
+  .namemsg { margin: 0; font-size: 12px; color: var(--ok); text-align: center; }
   .cnote { margin: 0; font-size: 12px; color: var(--sub); text-align: center; }
   .cmsg { margin: 0; min-height: 16px; font-size: 12px; color: var(--sub); text-align: center; }
   .modal { position: fixed; inset: 0; z-index: 20; background: rgba(10,8,16,.85); display: flex; align-items: center; justify-content: center; padding: 20px; }
@@ -162,19 +165,23 @@
       <button id="sound" class="secondary">🔊 音あり</button>
       <button id="reload" class="secondary">🔄 再接続</button>
     </div>
-    <form id="commentForm" class="cform" autocomplete="off">
-      <input id="cName" class="cname" maxlength="30" placeholder="名前">
-      <textarea id="cText" rows="2" maxlength="300" placeholder="コメントを入力"></textarea>
-      <button id="cSend" type="submit" class="primary small">コメント送信</button>
-      <p class="cnote">🔒 コメントは配信者のみに送信されます。</p>
-      <p id="cMsg" class="cmsg"></p>
-    </form>
     <div id="volRow" class="volrow">
       <span class="vollabel">音量</span>
       <input id="volume" type="range" min="0" max="100" step="5" value="80" aria-label="音量">
       <span id="volText" class="voltext">80%</span>
     </div>
     <p id="volIos" class="volios" hidden>iPhoneは本体の音量ボタンで調整してください</p>
+    <form id="commentForm" class="cform" autocomplete="off">
+      <div class="namerow">
+        <button id="nameSave" type="button" class="secondary namebtn">登録</button>
+        <input id="cName" class="cname" maxlength="30" placeholder="名前入力">
+      </div>
+      <p id="nameMsg" class="namemsg" hidden>ブラウザに保存しました</p>
+      <textarea id="cText" rows="2" maxlength="300" placeholder="コメントを入力"></textarea>
+      <button id="cSend" type="submit" class="primary small">コメント送信</button>
+      <p class="cnote">🔒 コメントは配信者のみに送信されます。</p>
+      <p id="cMsg" class="cmsg"></p>
+    </form>
   </div>
   <div id="msg" class="msg"></div>
 
@@ -696,6 +703,20 @@
   hello();
   setInterval(() => { if (document.visibilityState === 'visible') hello(); }, 30000);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') hello(); });
+
+  // ---- 名前の登録(ブラウザに保存) ----
+  let nameMsgTimer = null;
+  function saveName() {
+    const name = $('cName').value.trim();
+    store.set('yobs.name', name);
+    $('nameMsg').textContent = name ? 'ブラウザに保存しました' : '名前を消しました';
+    $('nameMsg').hidden = false;
+    clearTimeout(nameMsgTimer);
+    nameMsgTimer = setTimeout(() => { $('nameMsg').hidden = true; }, 2000);
+    hello();
+  }
+  $('nameSave').addEventListener('click', saveName);
+  $('cName').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); saveName(); } });
 
   // ---- コメント送信 ----
   $('commentForm').addEventListener('submit', async (e) => {
