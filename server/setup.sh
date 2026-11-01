@@ -6,7 +6,8 @@
 # 入るもの:
 #   - MediaMTX : OBS(RTMP)を受けて、HLS(iPhone等)と WebRTC(低遅延)で視聴者に配る
 #   - Caddy    : https の入口(証明書は自動。ホスト名は <IP>.sslip.io)
-#   - ufw      : 必要なポートだけ開ける
+#   - ufw      : すでに有効な場合だけ、必要なポートを追加(有効化はしない)
+# 既存のサービス(マイクラ等)や Caddy の設定は消しません。Caddyfile はバックアップ後に追記します。
 # 何度実行しても大丈夫です(送信パスワードは最初の1回だけ作られます)。
 set -euo pipefail
 
@@ -21,7 +22,7 @@ mkdir -p "$CONF_DIR"
 
 echo "==> パッケージを準備"
 apt-get update -y
-apt-get install -y curl tar gnupg debian-keyring debian-archive-keyring apt-transport-https ufw
+apt-get install -y curl tar gnupg debian-keyring debian-archive-keyring apt-transport-https
 
 echo "==> このサーバーの公開IPを確認"
 IP="$(curl -4 -fsS https://api.ipify.org || curl -4 -fsS https://ifconfig.me)"
@@ -34,6 +35,22 @@ if [ ! -s "$PASS_FILE" ]; then
   chmod 600 "$PASS_FILE"
 fi
 PASS="$(cat "$PASS_FILE")"
+
+echo "==> ポートの空きを確認"
+systemctl stop y-obs-mediamtx 2>/dev/null || true
+BUSY=""
+for P in 1935 8189 8888 8889; do
+  if ss -Hlntu "( sport = :$P )" | grep -q .; then BUSY="$BUSY $P"; fi
+done
+if [ -n "$BUSY" ]; then
+  echo "ポート${BUSY} がすでに他のソフトで使われています。中止します(何も変更していません)。" >&2
+  ss -lntup | grep -E ":(1935|8189|8888|8889)\b" >&2 || true
+  exit 1
+fi
+if ss -Hlnt "( sport = :443 )" | grep -q . && ! pgrep -x caddy >/dev/null; then
+  echo "443番を Caddy 以外のソフトが使っています。中止します(何も変更していません)。" >&2
+  exit 1
+fi
 
 echo "==> MediaMTX をインストール"
 case "$(uname -m)" in
@@ -116,7 +133,18 @@ if ! command -v caddy >/dev/null 2>&1; then
   apt-get install -y caddy
 fi
 
-cat > /etc/caddy/Caddyfile <<EOF
+CADDYFILE=/etc/caddy/Caddyfile
+BEGIN_MARK="# >>> Y-OBS >>>"
+END_MARK="# <<< Y-OBS <<<"
+touch "$CADDYFILE"
+BACKUP="$CADDYFILE.bak-yobs-$(date +%Y%m%d-%H%M%S)"
+cp -p "$CADDYFILE" "$BACKUP"
+echo "    Caddyfile をバックアップ: $BACKUP"
+# 前回の Y-OBS 部分だけ取り除いて、新しく追記
+sed -i "/^${BEGIN_MARK}\$/,/^${END_MARK}\$/d" "$CADDYFILE"
+cat >> "$CADDYFILE" <<EOF
+
+${BEGIN_MARK}
 ${HOST} {
 	handle_path /hls/* {
 		reverse_proxy 127.0.0.1:8888
@@ -128,23 +156,29 @@ ${HOST} {
 		respond "Y-OBS server OK" 200
 	}
 }
+${END_MARK}
 EOF
+if ! caddy validate --config "$CADDYFILE" --adapter caddyfile >/tmp/y-obs-caddy-validate.log 2>&1; then
+  cp -p "$BACKUP" "$CADDYFILE"
+  echo "Caddy の設定チェックに失敗したので元に戻しました。中止します。" >&2
+  tail -n 20 /tmp/y-obs-caddy-validate.log >&2
+  exit 1
+fi
 
 echo "==> ファイアウォール"
-ufw allow 22/tcp >/dev/null
-ufw allow 80/tcp >/dev/null
-ufw allow 443/tcp >/dev/null
-ufw allow 1935/tcp >/dev/null
-ufw allow 8189/tcp >/dev/null
-ufw allow 8189/udp >/dev/null
-ufw --force enable >/dev/null
+if command -v ufw >/dev/null 2>&1 && ufw status | grep -q "Status: active"; then
+  for R in 80/tcp 443/tcp 1935/tcp 8189/tcp 8189/udp; do ufw allow "$R" >/dev/null; done
+  echo "    ufw に 80,443,1935,8189 を追加しました"
+else
+  echo "    ufw は無効なので変更しません(さくらのパケットフィルターで許可してください)"
+fi
 
 echo "==> 起動"
 systemctl daemon-reload
 systemctl enable --now y-obs-mediamtx >/dev/null
 systemctl restart y-obs-mediamtx
 systemctl enable caddy >/dev/null
-systemctl restart caddy
+if systemctl is-active --quiet caddy; then systemctl reload caddy; else systemctl start caddy; fi
 
 cat > "$CONF_DIR/info.txt" <<EOF
 サーバー        : ${HOST}  (${IP})
