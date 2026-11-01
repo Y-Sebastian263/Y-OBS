@@ -11,6 +11,8 @@ Caddy 経由で https://<host>/count と https://<host>/api/... に公開され�
   POST /api/admin/title        配信タイトルを設定(配信終了で自動リセット)
   POST /api/admin/mute         コメントのミュート {"device","on"}(ミュート中の端末のコメントは記録しない)
   POST /api/admin/logout
+  POST /api/consent            年齢制限の注意への同意 {"device","version"}(記録が残る)
+  POST /api/admin/rating       年齢制限(R18)の設定 {"on","text"}
   GET  /api/admin/visits?from=&to=[&device=]   訪問履歴(端末ごと・期間指定)
   GET  /api/admin/streams                      配信の一覧
   GET  /api/admin/stream?id=                   配信の詳細(1分ごとの視聴者数・コメント数)
@@ -98,6 +100,13 @@ comments = load_comments()
 stream = load_json("stream.json", {"title": ""})                # 配信タイトル(配信終了でリセット)
 mutes = load_json("mutes.json", {"devices": {}, "keys": {}})   # コメントのミュート
 TITLE_MAX = 60
+RATING_TEXT = "ホラーゲームなどのショッキングな内容(暴力・流血表現など)を含みます。18歳以上の方のみご視聴ください。"
+stream.setdefault("rating", {"on": False, "text": RATING_TEXT, "version": ""})   # 年齢制限(R18)の設定
+
+
+def rating_public():
+    r = stream.get("rating", {})
+    return {"on": bool(r.get("on")), "text": r.get("text") or RATING_TEXT, "version": r.get("version", "")}
 
 
 def append_comment(c):
@@ -306,7 +315,7 @@ def count_snapshot():
     hls, rtc = count_hls(now), count_webrtc()
     live = bool((api_get(f"/v3/paths/get/{STREAM}") or {}).get("ready"))
     data = {"viewers": hls + rtc, "hls": hls, "webrtc": rtc, "live": live,
-            "title": stream.get("title", "") if live else ""}
+            "title": stream.get("title", "") if live else "", "rating": rating_public()}
     _count_cache.update(t=now, data=data)
     return data
 
@@ -316,6 +325,11 @@ def count_snapshot():
 VISIT_GAP = 180
 visits = load_jsonl("visits.jsonl")                 # [{device, start, end}]
 visits_open = load_json("visits_open.json", {})     # ブラウザID -> {start, last}
+consents = load_jsonl("consents.jsonl")              # 年齢制限への同意の記録 [{ts, device, ip, label, version, text}]
+
+
+def consents_of(device):
+    return [{"ts": c["ts"], "version": c["version"], "ip": c.get("ip", "")} for c in consents if c.get("device") == device]
 
 
 def visit_touch(device, now):
@@ -383,6 +397,7 @@ def visits_report(t_from, t_to, only=None):
                 "device": d, "label": sv.get("label", ""), "browser": sv.get("label", "").split(" / ")[-1],
                 "ua": sv.get("ua", ""), "first": sv.get("first", 0), "last": sv.get("last", 0),
                 "names_hist": sv.get("names", []), "ips_hist": sv.get("ips", []), "muted": bool(is_muted(d)),
+                "consents": consents_of(d),
             })
         g["ips"] = ips
         g["first"] = min((m["first"] for m in g["members"] if m["first"]), default=0)
@@ -620,6 +635,7 @@ class Handler(BaseHTTPRequestHandler):
                         "ip": c["ip"], "tabs": n_tabs, "first": sv.get("first", c.get("first", now)),
                         "last": c["last"], "viewing": c["viewing"], "muted": bool(is_muted(dev)),
                         "names_hist": sv.get("names", []), "ips_hist": sv.get("ips", []),
+                        "consents": consents_of(dev),
                     })
                     if n_tabs:
                         g["tabs"] += n_tabs
@@ -638,6 +654,7 @@ class Handler(BaseHTTPRequestHandler):
                     "bans": {"devices": len(bans["devices"]), "ips": len(bans["ips"])},
                     "count": count_snapshot(),
                     "title": stream.get("title", ""),
+                    "rating": rating_public(),
                     "now": now,
                 }
             return self.send_json(200, data)
@@ -743,6 +760,36 @@ class Handler(BaseHTTPRequestHandler):
                 save_json("stream.json", stream)
                 _count_cache["data"] = None
             return self.send_json(200, {"ok": True, "title": stream["title"]})
+
+        if p == "/api/consent":
+            # 視聴者が年齢制限の注意に同意した記録
+            with lock:
+                if is_banned(device, ip):
+                    return self.send_json(403, {"error": "アクセスが禁止されています"})
+                if not device:
+                    return self.send_json(400, {"error": "端末が不明です"})
+                ua = clean(self.headers.get("User-Agent"), 300)
+                r = rating_public()
+                rec = {"ts": now, "device": device, "ip": ip, "label": device_label(ua),
+                       "version": clean(d.get("version"), 32) or r["version"], "text": r["text"]}
+                consents.append(rec)
+                append_jsonl("consents.jsonl", rec)
+                remember(device, clean(d.get("hw"), 16), ip, ua, "", now)
+            return self.send_json(200, {"ok": True})
+
+        if p == "/api/admin/rating":
+            with lock:
+                if not valid_token(self.token()):
+                    return self.send_json(401, {"error": "ログインしてください"})
+                on = bool(d.get("on"))
+                text = clean(d.get("text"), 200) or RATING_TEXT
+                r = stream["rating"]
+                if on != r.get("on") or text != r.get("text"):
+                    r["version"] = str(int(now)) if on else ""   # 変えたら全員にもう一度同意してもらう
+                r["on"], r["text"] = on, text
+                save_json("stream.json", stream)
+                _count_cache["data"] = None
+            return self.send_json(200, {"ok": True, "rating": rating_public()})
 
         if p == "/api/admin/mute":
             with lock:
