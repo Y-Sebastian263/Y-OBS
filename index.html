@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14111c">
-<title>Y-OBS ミニプレイヤー</title>
+<title>Y-OBS</title>
 <style>
   :root {
     --bg: #14111c; --panel: #1f1a2b; --line: #352d47; --text: #f3eefc; --sub: #a99cc4;
@@ -28,6 +28,8 @@
   .screen { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000;
     border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
   video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+  .screen:fullscreen { border-radius: 0; border: 0; aspect-ratio: auto; width: 100vw; height: 100vh; }
+  .screen:-webkit-full-screen { border-radius: 0; border: 0; width: 100vw; height: 100vh; }
   .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     text-align: center; padding: 16px; font-size: 14px; color: var(--sub); background: rgba(0,0,0,.55); }
   .overlay[hidden] { display: none; }
@@ -40,6 +42,10 @@
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .row2 button { padding: 14px 6px; font-size: 15px; }
   .wide { width: 100%; }
+  .mainrow { display: grid; grid-template-columns: 2fr 1fr; gap: 10px; }
+  .primary.fs { background: linear-gradient(135deg, var(--accent2), #4c6fff); font-size: 16px; padding: 20px 8px; }
+  .primary.back { background: linear-gradient(135deg, #3ddc97, #2bb0a8); }
+  .pcnote { margin: 12px 0 0; font-size: 13px; color: var(--sub); text-align: center; }
   .homehint { position: fixed; inset: 0; z-index: 10; background: rgba(10,8,16,.92);
     display: flex; align-items: flex-end; justify-content: center; padding: 24px 20px max(40px, env(safe-area-inset-bottom)); }
   .homehint-box { text-align: center; width: 100%; max-width: 420px; }
@@ -73,7 +79,7 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Y-OBS ミニプレイヤー</h1>
+    <h1>Y-OBS</h1>
     <div class="pills">
       <span id="viewers" class="pill" hidden>👀 <span id="viewersText">0</span>人</span>
       <span id="status" class="pill"><span class="dot"></span><span id="statusText">準備中</span></span>
@@ -86,7 +92,10 @@
   </div>
 
   <div class="btns">
-    <button id="pipOnly" class="primary">ミニプレイヤーにする</button>
+    <div class="mainrow">
+      <button id="pipOnly" class="primary">ミニプレイヤーにする</button>
+      <button id="fullscreen" class="primary fs">⛶ 全画面</button>
+    </div>
     <div class="row2">
       <button id="sound" class="secondary">🔊 音あり</button>
       <button id="reload" class="secondary">🔄 再接続</button>
@@ -106,6 +115,7 @@
       <button id="openIos" class="os">iPhone<br><small>Safariで開く</small></button>
       <button id="openAndroid" class="os">Android<br><small>Chromeで開く</small></button>
     </div>
+    <p class="pcnote">💻 PCでも閲覧できます</p>
   </div>
 </div>
 
@@ -383,11 +393,15 @@
   // iPhone はページからホームへ戻せないので、スワイプの案内を出す。
   let wantHome = false;
   function onPipEntered() {
+    $('pipOnly').textContent = 'ミニプレイヤーを戻す';
+    $('pipOnly').classList.add('back');
     if (wantReturn) setTimeout(openReality, 150);
     if (wantHome && isIOS) $('homeHint').hidden = false;
     wantHome = false;
   }
   function onPipLeft() {
+    $('pipOnly').textContent = 'ミニプレイヤーにする';
+    $('pipOnly').classList.remove('back');
     $('homeHint').hidden = true;
   }
   $('homeHintClose').addEventListener('click', () => { $('homeHint').hidden = true; });
@@ -398,10 +412,46 @@
   $('pipOnly').addEventListener('click', () => {
     say('');
     wantReturn = false;
+    if (inPip()) { exitPip(); return; }   // ミニプレイヤー中なら元に戻す
     wantHome = true;
     applySound();
     enterPip().catch((e) => { wantHome = false; say(e.message); });
   });
+
+  function exitPip() {
+    if (document.pictureInPictureElement && document.exitPictureInPicture) {
+      document.exitPictureInPicture().catch(() => {});
+    } else if (video.webkitSetPresentationMode) {
+      video.webkitSetPresentationMode('inline');
+    }
+  }
+
+  // ---- 全画面 ----
+  $('fullscreen').addEventListener('click', () => {
+    say('');
+    applySound();
+    if (inPip()) exitPip();
+    const el = document.querySelector('.screen');
+    try {
+      if (el.requestFullscreen && document.fullscreenEnabled) {
+        el.requestFullscreen().catch(() => videoFullscreen());
+      } else if (el.webkitRequestFullscreen && document.webkitFullscreenEnabled) {
+        el.webkitRequestFullscreen();
+      } else {
+        videoFullscreen();
+      }
+    } catch { videoFullscreen(); }
+  });
+  function videoFullscreen() {
+    // iPhone の Safari は動画そのものの全画面だけ使える
+    if (video.webkitEnterFullscreen) {
+      try { video.webkitEnterFullscreen(); } catch { say('全画面にできませんでした'); }
+    } else if (video.requestFullscreen) {
+      video.requestFullscreen().catch(() => say('全画面にできませんでした'));
+    } else {
+      say('このブラウザは全画面に対応していません');
+    }
+  }
 
   $('sound').addEventListener('click', () => {
     soundOn = !soundOn;
