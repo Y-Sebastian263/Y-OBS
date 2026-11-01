@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14111c">
+<title>Y-OBS ミニプレイヤー</title>
+<style>
+  :root {
+    --bg: #14111c; --panel: #1f1a2b; --line: #352d47; --text: #f3eefc; --sub: #a99cc4;
+    --accent: #ff6fae; --accent2: #7c5cff; --ok: #3ddc97; --warn: #ffc857; --ng: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif; }
+  body { padding: max(14px, env(safe-area-inset-top)) 14px max(20px, env(safe-area-inset-bottom)); }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  h1 { font-size: 17px; margin: 0; letter-spacing: .02em; }
+  .pill { font-size: 12px; padding: 4px 10px; border-radius: 99px; background: var(--panel);
+    border: 1px solid var(--line); display: inline-flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--sub); }
+  .pill.live .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .pill.wait .dot { background: var(--warn); }
+  .pill.err .dot { background: var(--ng); }
+  .screen { position: relative; width: 100%; aspect-ratio: 16 / 9; background: #000;
+    border-radius: 14px; overflow: hidden; border: 1px solid var(--line); }
+  video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+  .overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 16px; font-size: 14px; color: var(--sub); background: rgba(0,0,0,.55); }
+  .overlay[hidden] { display: none; }
+  .btns { display: grid; gap: 10px; margin-top: 14px; }
+  button, .btn { appearance: none; border: 0; border-radius: 14px; padding: 16px; font-size: 16px;
+    font-weight: 700; color: #fff; text-align: center; text-decoration: none; cursor: pointer;
+    font-family: inherit; -webkit-tap-highlight-color: transparent; }
+  .primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); font-size: 18px; padding: 20px 16px; }
+  .secondary { background: var(--panel); border: 1px solid var(--line); font-weight: 600; }
+  .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+  .row3 button { padding: 14px 6px; font-size: 14px; }
+  button:active, .btn:active { transform: scale(.98); }
+  .msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--sub); text-align: center; }
+  details { margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; }
+  summary { padding: 10px 0; font-size: 14px; font-weight: 600; cursor: pointer; }
+  label { display: block; font-size: 12px; color: var(--sub); margin: 10px 0 4px; }
+  input { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font-size: 14px; }
+  .hint { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 8px 0 12px; }
+  .hint b { color: var(--text); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Y-OBS ミニプレイヤー</h1>
+    <span id="status" class="pill"><span class="dot"></span><span id="statusText">準備中</span></span>
+  </header>
+
+  <div class="screen">
+    <video id="video" muted playsinline webkit-playsinline autoplay></video>
+    <div id="overlay" class="overlay">接続先が未設定です。<br>PCのOBSに表示されたQRコードから開いてください。</div>
+  </div>
+
+  <div class="btns">
+    <button id="goReality" class="primary">ミニプレイヤーにしてREALITYへ戻る</button>
+    <div class="row3">
+      <button id="pipOnly" class="secondary">ミニプレイヤーだけ</button>
+      <button id="sound" class="secondary">🔊 音あり</button>
+      <button id="reload" class="secondary">再接続</button>
+    </div>
+  </div>
+  <div id="msg" class="msg"></div>
+
+  <details>
+    <summary>設定</summary>
+    <label for="srcInput">映像の接続先(OBSのQRから開くと自動で入ります)</label>
+    <input id="srcInput" type="url" placeholder="https://xxxx.trycloudflare.com/live/index.m3u8" autocomplete="off">
+    <label for="retInput">REALITYの戻り先URL(空欄なら標準)</label>
+    <input id="retInput" type="url" placeholder="https://reality.app/" autocomplete="off">
+    <p class="hint">戻るボタンでREALITYが開かない場合は、REALITYアプリの「プロフィールをシェア」で出るURLをここに貼ってください。</p>
+    <button id="save" class="secondary" style="width:100%">保存して再接続</button>
+    <p class="hint">
+      <b>iPhone:</b> Safariで開いてください(ホーム画面に追加したアプリ版や、LINEなどの中のブラウザではミニプレイヤーが使えません)。<br>
+      <b>Android:</b> Chromeで開いてください。設定 → アプリ → Chrome → 「ピクチャー イン ピクチャー」を許可。<br>
+      音は最初ミュートで始まり、ボタンをタップすると出ます(🔊ボタンで切替)。音量はOBS側で調整してください。遅延は1〜3秒くらいです。<br>
+      <b>iPhoneでREALITYに戻るとミニプレイヤーが止まる場合</b>は、🔇(音なし)にすると止まりにくくなります。
+    </p>
+  </details>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
+<script>
+(() => {
+  const REALITY_PACKAGE = 'net.wrightflyer.le.reality';
+  const DEFAULT_RETURN = 'https://reality.app/';
+  const KEY_SRC = 'yobs.src', KEY_RET = 'yobs.ret', KEY_SOUND = 'yobs.sound';
+
+  const $ = (id) => document.getElementById(id);
+  const video = $('video'), overlay = $('overlay'), msg = $('msg');
+  const ua = navigator.userAgent;
+  const isIOS = /iP(hone|ad|od)/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isAndroid = /Android/i.test(ua);
+
+  // ---- 保存まわり(localStorage は使えない環境もあるので try で包む) ----
+  const store = {
+    get(k) { try { return localStorage.getItem(k) || ''; } catch { return ''; } },
+    set(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} },
+  };
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('src')) store.set(KEY_SRC, params.get('src').trim());
+  if (params.get('ret')) store.set(KEY_RET, params.get('ret').trim());
+
+  let src = store.get(KEY_SRC);
+  $('srcInput').value = src;
+  $('retInput').value = store.get(KEY_RET);
+
+  // ---- 音声(自動再生はミュート必須なので、タップ時に音を出す) ----
+  let soundOn = store.get(KEY_SOUND) !== 'off';
+  function drawSound() { $('sound').textContent = soundOn ? '🔊 音あり' : '🔇 音なし'; }
+  function applySound() { video.muted = !soundOn; drawSound(); }
+  drawSound();
+
+  // ---- 状態表示 ----
+  function setStatus(kind, text) {
+    $('status').className = 'pill ' + kind;
+    $('statusText').textContent = text;
+  }
+  function showOverlay(text) { overlay.innerHTML = text; overlay.hidden = !text; }
+  function say(text) { msg.textContent = text || ''; }
+
+  // ---- 再生 ----
+  let hls = null, retryTimer = null;
+
+  function stopPlayer() {
+    clearTimeout(retryTimer);
+    if (hls) { hls.destroy(); hls = null; }
+    video.removeAttribute('src');
+    video.load();
+  }
+
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    setStatus('wait', '配信待ち');
+    showOverlay('配信を待っています…<br>OBSで配信を開始すると自動で映ります。');
+    retryTimer = setTimeout(startPlayer, 3000);
+  }
+
+  function startPlayer() {
+    stopPlayer();
+    if (!src) {
+      setStatus('', '未設定');
+      showOverlay('接続先が未設定です。<br>PCのOBSに表示されたQRコードから開いてください。');
+      return;
+    }
+    video.muted = true; // 自動再生のため最初はミュート。タップ時に applySound()
+    setStatus('wait', '接続中');
+
+    const nativeHls = video.canPlayType('application/vnd.apple.mpegurl');
+    // iPhone は標準プレイヤー(ミニプレイヤー対応のため)、それ以外は hls.js を優先
+    if (isIOS && nativeHls) {
+      video.src = src;
+      video.play().catch(() => {});
+    } else if (window.Hls && Hls.isSupported()) {
+      hls = new Hls({
+        lowLatencyMode: true,
+        liveSyncDuration: 1.5,
+        liveMaxLatencyDuration: 6,
+        maxLiveSyncPlaybackRate: 1.5,
+        backBufferLength: 10,
+        manifestLoadingMaxRetry: 0,
+      });
+      hls.on(Hls.Events.ERROR, (_, data) => { if (data.fatal) scheduleRetry(); });
+      hls.loadSource(src);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+    } else if (nativeHls) {
+      video.src = src;
+      video.play().catch(() => {});
+    } else {
+      setStatus('err', '非対応');
+      showOverlay('このブラウザでは再生できません。<br>iPhoneはSafari、AndroidはChromeで開いてください。');
+    }
+  }
+
+  video.addEventListener('playing', () => { setStatus('live', '再生中'); showOverlay(''); });
+  video.addEventListener('waiting', () => setStatus('wait', '読み込み中'));
+  video.addEventListener('error', () => { if (!hls) scheduleRetry(); });
+  video.addEventListener('ended', scheduleRetry);
+  // 一時停止されたら(ミニプレイヤー中も含めて)すぐ再開する
+  video.addEventListener('pause', () => { if (src && !video.ended) setTimeout(() => video.play().catch(() => {}), 300); });
+
+  // 標準プレイヤー時、遅れが溜まったら最新位置へ追いつく
+  setInterval(() => {
+    if (hls || !video.seekable || !video.seekable.length) return;
+    const edge = video.seekable.end(video.seekable.length - 1);
+    if (edge - video.currentTime > 4) video.currentTime = edge - 1;
+  }, 2000);
+
+  // ---- ミニプレイヤー ----
+  const inPip = () => !!document.pictureInPictureElement || video.webkitPresentationMode === 'picture-in-picture';
+
+  function enterPip() {
+    if (inPip()) return Promise.resolve();
+    if (video.readyState < 2) return Promise.reject(new Error('まだ映像が届いていません'));
+    if (video.requestPictureInPicture && document.pictureInPictureEnabled !== false) {
+      return video.requestPictureInPicture();
+    }
+    if (video.webkitSupportsPresentationMode && video.webkitSupportsPresentationMode('picture-in-picture')) {
+      video.webkitSetPresentationMode('picture-in-picture');
+      return Promise.resolve();
+    }
+    return Promise.reject(new Error('このブラウザはミニプレイヤーに対応していません'));
+  }
+
+  // ---- REALITYへ戻る ----
+  function returnUrl() {
+    const custom = store.get(KEY_RET) || DEFAULT_RETURN;
+    if (isAndroid) {
+      // https のリンクを REALITY アプリ指定で開く(未インストール時はリンク先へ)
+      try {
+        const u = new URL(custom);
+        if (u.protocol === 'https:' || u.protocol === 'http:') {
+          return 'intent://' + u.host + u.pathname + u.search +
+            '#Intent;scheme=' + u.protocol.replace(':', '') +
+            ';package=' + REALITY_PACKAGE +
+            ';S.browser_fallback_url=' + encodeURIComponent(custom) + ';end';
+        }
+      } catch {}
+    }
+    return custom;
+  }
+
+  let wantReturn = false;
+  function openReality() {
+    wantReturn = false;
+    location.href = returnUrl();
+  }
+
+  function onPipEntered() {
+    $('goReality').textContent = 'REALITYを開く';
+    if (wantReturn) setTimeout(openReality, 150);
+  }
+  function onPipLeft() {
+    $('goReality').textContent = 'ミニプレイヤーにしてREALITYへ戻る';
+  }
+  video.addEventListener('enterpictureinpicture', onPipEntered);
+  video.addEventListener('leavepictureinpicture', onPipLeft);
+  video.addEventListener('webkitpresentationmodechanged', () => inPip() ? onPipEntered() : onPipLeft());
+
+  $('goReality').addEventListener('click', () => {
+    say('');
+    applySound();
+    if (inPip()) { openReality(); return; }
+    wantReturn = true;
+    enterPip().catch((e) => {
+      wantReturn = false;
+      say(e.message + '。そのままREALITYを開く場合はもう一度タップ。');
+      $('goReality').textContent = 'REALITYを開く(映像なし)';
+      $('goReality').onclick = () => { $('goReality').onclick = null; openReality(); };
+    });
+    // 自動で切り替わらなかったとき用の案内
+    setTimeout(() => {
+      if (wantReturn && document.visibilityState === 'visible' && inPip()) {
+        say('REALITYが開かない時は、もう一度「REALITYを開く」をタップしてください。');
+      }
+    }, 1500);
+  });
+
+  $('pipOnly').addEventListener('click', () => {
+    say('');
+    wantReturn = false;
+    applySound();
+    enterPip().catch((e) => say(e.message));
+  });
+
+  $('sound').addEventListener('click', () => {
+    soundOn = !soundOn;
+    store.set(KEY_SOUND, soundOn ? 'on' : 'off');
+    applySound();
+    video.play().catch(() => {});
+  });
+
+  $('reload').addEventListener('click', () => { say(''); startPlayer(); applySound(); });
+
+  $('save').addEventListener('click', () => {
+    src = $('srcInput').value.trim();
+    store.set(KEY_SRC, src);
+    store.set(KEY_RET, $('retInput').value.trim());
+    say('保存しました');
+    startPlayer();
+  });
+
+  // 画面に戻ってきたら止まっていないか確認
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && src && video.paused) video.play().catch(() => {});
+  });
+
+  startPlayer();
+})();
+</script>
+</body>
+</html>
