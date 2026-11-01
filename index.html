@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102050025';
+  window.YOBS_VERSION = '20261102055144';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -214,6 +214,56 @@
   .c-time { font-size: 11px; color: var(--sub); }
   .c-text { margin: 4px 0; white-space: pre-wrap; word-break: break-word; }
   .c-meta { font-size: 11px; color: var(--sub); }
+  /* ===== コンパクト表示(YouTubeアプリ風: 小さめの文字・丸いボタン・枠線少なめ) ===== */
+  body { font-size: 14px; padding: max(10px, env(safe-area-inset-top)) 12px max(16px, env(safe-area-inset-bottom)); }
+  header { margin-bottom: 8px; }
+  h1 { font-size: 16px; font-weight: 700; letter-spacing: 0; }
+  .pill { font-size: 11px; padding: 3px 8px; gap: 5px; border: 0; background: #272132; }
+  .dot { width: 7px; height: 7px; }
+  .screen { border-radius: 10px; border: 0; }
+  .overlay { font-size: 13px; }
+  .stitle { font-size: 15px; font-weight: 700; line-height: 1.45; margin: 0 0 8px; padding: 0 2px;
+    background: none; border: 0; border-radius: 0; }
+  .btns { gap: 8px; margin-top: 10px; }
+  button, .btn { border-radius: 999px; padding: 10px 14px; font-size: 14px; font-weight: 600; }
+  .primary { font-size: 14px; padding: 11px 14px; }
+  .primary.fs { font-size: 14px; padding: 11px 8px; }
+  .mainrow, .row2 { gap: 8px; }
+  .row2 button { padding: 9px 6px; font-size: 13px; }
+  .secondary { background: #272132; border: 0; font-weight: 500; }
+  .volrow { padding: 4px 16px; gap: 10px; border-radius: 999px; background: #272132; border: 0; }
+  .vollabel { font-size: 13px; font-weight: 500; }
+  .voltext { font-size: 12px; }
+  .volrow input[type=range] { height: 22px; }
+  .volios { font-size: 11px; }
+  .msg { font-size: 12px; margin-top: 6px; min-height: 16px; }
+  .cform { gap: 6px; padding: 10px; border-radius: 12px; border: 0; background: #1c1726; }
+  /* 入力欄は 16px のまま(iPhone で押した時に画面が拡大されないように) */
+  .cform input, .cform textarea { padding: 8px 12px; border-radius: 10px; font-size: 16px; border-color: #2e2740; }
+  .cform textarea { min-height: 40px; }
+  .namerow { gap: 6px; }
+  .namebtn { padding: 0 14px; font-size: 13px; }
+  .primary.small { font-size: 14px; padding: 10px; }
+  .secondary.small { font-size: 12px; padding: 6px 12px; }
+  .cnote, .cmsg, .namemsg { font-size: 11px; }
+  .openbox { margin-top: 14px; padding: 10px; border-radius: 12px; border: 0; background: #1c1726; }
+  .opennote { font-size: 12px; margin-bottom: 8px; }
+  .os { padding: 8px 6px; font-size: 13px; border: 0; border-radius: 12px; line-height: 1.25; }
+  .os small { font-size: 11px; }
+  .pcnote { font-size: 12px; margin-top: 8px; }
+  .age-icon { font-size: 40px; }
+  .age-text { font-size: 13px; }
+  .modal-box { border-radius: 16px; padding: 18px; gap: 10px; }
+  .modal-box h2 { font-size: 16px; }
+  .homehint-main { font-size: 18px; }
+  .homehint-arrow { font-size: 44px; }
+  .ban-main { font-size: 17px; }
+  /* 管理画面中の左の視聴画面はさらに小さく */
+  body.admin-on .wrap .primary { font-size: 13px; padding: 9px 8px; }
+  body.admin-on .wrap .row2 button { font-size: 12px; padding: 8px 4px; }
+  body.admin-on .wrap .stitle { font-size: 14px; }
+  .admin-head h2 { font-size: 15px; }
+  .admin-sec h3 { font-size: 13px; }
 </style>
 </head>
 <body>
