@@ -145,16 +145,15 @@ sed -i "/^${BEGIN_MARK}\$/,/^${END_MARK}\$/d" "$CADDYFILE"
 cat >> "$CADDYFILE" <<EOF
 
 ${BEGIN_MARK}
+# 視聴(HLS)と低遅延(WebRTC)はアドレスを分けて、パスを書き換えずにそのまま中継する
+hls.${HOST} {
+	reverse_proxy 127.0.0.1:8888
+}
+rtc.${HOST} {
+	reverse_proxy 127.0.0.1:8889
+}
 ${HOST} {
-	handle_path /hls/* {
-		reverse_proxy 127.0.0.1:8888
-	}
-	handle_path /rtc/* {
-		reverse_proxy 127.0.0.1:8889
-	}
-	handle {
-		respond "Y-OBS server OK" 200
-	}
+	respond "Y-OBS server OK" 200
 }
 ${END_MARK}
 EOF
@@ -184,8 +183,8 @@ cat > "$CONF_DIR/info.txt" <<EOF
 サーバー        : ${HOST}  (${IP})
 OBS サーバー    : rtmp://${IP}:1935
 OBS 送信パスワード: ${PASS}
-視聴 HLS       : https://${HOST}/hls/live/index.m3u8
-視聴 WebRTC    : https://${HOST}/rtc/live/whep
+視聴 HLS       : https://hls.${HOST}/live/index.m3u8
+視聴 WebRTC    : https://rtc.${HOST}/live/whep
 EOF
 chmod 600 "$CONF_DIR/info.txt"
 
