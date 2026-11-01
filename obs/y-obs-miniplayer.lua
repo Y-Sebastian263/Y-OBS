@@ -16,6 +16,7 @@ local HLS_PORT = 8888
 local WEBRTC_PORT = 8889
 
 local cfg = {
+  pub_pass    = "",
   tools_dir   = "",
   pages_url   = DEFAULT_PAGES_URL,
   stream_name = "live",
@@ -202,7 +203,8 @@ end
 local function on_setup(props, prop)
   local s = obs.obs_data_create()
   obs.obs_data_set_string(s, "server", "rtmp://127.0.0.1:1935")
-  obs.obs_data_set_string(s, "key", cfg.stream_name ~= "" and cfg.stream_name or "live")
+  obs.obs_data_set_string(s, "key", (cfg.stream_name ~= "" and cfg.stream_name or "live") ..
+    "?user=obs&pass=" .. cfg.pub_pass)
   local svc = obs.obs_service_create("rtmp_custom", "y-obs-miniplayer", s, nil)
   obs.obs_frontend_set_streaming_service(svc)
   obs.obs_frontend_save_streaming_service()
@@ -220,8 +222,31 @@ local function start_servers()
   os.remove(dir .. "\\tunnel.log")
   os.remove(dir .. "\\tunnel-rtc.log")
 
+  -- 視聴(read)は誰でもOK、送信(publish)はパスワード付きの OBS だけ
+  write_file(dir .. "\\y-obs-mediamtx.yml", table.concat({
+    "authInternalUsers:",
+    "  - user: any",
+    "    ips: []",
+    "    permissions:",
+    "      - action: read",
+    "      - action: playback",
+    "  - user: obs",
+    "    pass: " .. cfg.pub_pass,
+    "    ips: []",
+    "    permissions:",
+    "      - action: publish",
+    "  - user: any",
+    "    ips: ['127.0.0.1', '::1']",
+    "    permissions:",
+    "      - action: api",
+    "      - action: metrics",
+    "      - action: pprof",
+    "paths:",
+    "  all_others:",
+    "",
+  }, "\r\n"))
   write_file(dir .. "\\y-obs-mediamtx.bat",
-    "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. mtx .. "\" > mediamtx.log 2>&1\r\n")
+    "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. mtx .. "\" y-obs-mediamtx.yml > mediamtx.log 2>&1\r\n")
   write_file(dir .. "\\y-obs-tunnel.bat",
     "@echo off\r\ncd /d \"%~dp0\"\r\n\"" .. cfd .. "\" tunnel --no-autoupdate --url http://127.0.0.1:" ..
     HLS_PORT .. " > tunnel.log 2>&1\r\n")
@@ -279,7 +304,7 @@ end
 function script_description()
   return [[<h3>Y-OBS ミニプレイヤー配信</h3>
 OBSの映像をスマホのミニプレイヤー用ページに届けます。<br>
-<b>初回だけ:</b> ツールフォルダを選んで「① 配信先を設定」<br>
+<b>初回だけ:</b> ツールフォルダを選んで「① 配信先を設定」(更新後はもう一度押してください)<br>
 <b>毎回:</b> 「② まとめて開始」→ PCに出るQRをスマホで読む<br>
 <small>※①はOBSの「配信」設定を上書きします。</small>]]
 end
@@ -302,8 +327,29 @@ function script_defaults(settings)
   obs.obs_data_set_default_string(settings, "stream_name", "live")
 end
 
+local function random_pass()
+  local chars = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+  math.randomseed(os.time() + math.floor(os.clock() * 1000000))
+  local t = {}
+  for i = 1, 20 do
+    local n = math.random(1, #chars)
+    t[i] = chars:sub(n, n)
+  end
+  return table.concat(t)
+end
+
+function script_load(settings)
+  -- OBS 送信用パスワード(初回に自動作成して OBS の設定内にだけ保存)
+  if obs.obs_data_get_string(settings, "pub_pass") == "" then
+    obs.obs_data_set_string(settings, "pub_pass", random_pass())
+  end
+  cfg.pub_pass = obs.obs_data_get_string(settings, "pub_pass")
+end
+
 function script_update(settings)
   cfg.tools_dir   = obs.obs_data_get_string(settings, "tools_dir")
+  local pp = obs.obs_data_get_string(settings, "pub_pass")
+  if pp ~= "" then cfg.pub_pass = pp end
   cfg.pages_url   = obs.obs_data_get_string(settings, "pages_url")
   cfg.stream_name = obs.obs_data_get_string(settings, "stream_name"):gsub("[^%w%-_]", "")
 end
