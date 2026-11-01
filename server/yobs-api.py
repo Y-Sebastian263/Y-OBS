@@ -371,6 +371,21 @@ def visits_report(t_from, t_to, only=None):
             if sv.get("label") and sv["label"] not in labels:
                 labels.append(sv["label"])
         g["names"], g["labels"] = names, labels
+        # 端末の詳細(今つながっていなくても記録から出す)
+        g["members"] = []
+        ips = []
+        for d in members:
+            sv = seen.get(d, {})
+            for ip in sv.get("ips", []):
+                if ip not in ips:
+                    ips.append(ip)
+            g["members"].append({
+                "device": d, "label": sv.get("label", ""), "browser": sv.get("label", "").split(" / ")[-1],
+                "ua": sv.get("ua", ""), "first": sv.get("first", 0), "last": sv.get("last", 0),
+                "names_hist": sv.get("names", []), "ips_hist": sv.get("ips", []), "muted": bool(is_muted(d)),
+            })
+        g["ips"] = ips
+        g["first"] = min((m["first"] for m in g["members"] if m["first"]), default=0)
         mset = set(members)
         g["visits"].sort(key=lambda v: v["start"], reverse=True)
         for v in g["visits"]:

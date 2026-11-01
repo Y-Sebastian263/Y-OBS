@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102034223';
+  window.YOBS_VERSION = '20261102045122';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -701,6 +701,8 @@
   }
 
   $('sound').addEventListener('click', () => {
+    if (!soundOn && !canMix &&
+        !confirm('この端末では、音ありにするとREALITYの音が止まることがあります。\n音ありにしますか?')) return;
     soundOn = !soundOn;
     store.set(KEY_SOUND, soundOn ? 'on' : 'off');
     applySound();
@@ -1099,6 +1101,38 @@
   $('hDate').addEventListener('change', () => { if ($('hDate').value) { const [y, m, dd] = $('hDate').value.split('-').map(Number); hCursor = new Date(y, m - 1, dd); loadHistory(); } });
   $('hMon').addEventListener('change', () => { if ($('hMon').value) { const [y, m] = $('hMon').value.split('-').map(Number); hCursor = new Date(y, m - 1, 1); loadHistory(); } });
 
+  // 履歴から端末の詳細を開く(今つながっていない端末も記録から表示)
+  function openHistDetail(g) {
+    const box = $('detailBody');
+    box.textContent = '';
+    const dl = el('dl', 'dl');
+    const add = (k, v, mono) => { dl.append(el('dt', '', k)); dl.append(el('dd', mono ? 'mono' : '', v)); };
+    add('名前', g.names.join(', ') || '—');
+    add('端末', g.labels.join(', ') || '—');
+    add('IPアドレス', (g.ips || []).join(', ') || '—', true);
+    add('端末番号', g.key, true);
+    add('最初のアクセス', g.first ? fmtDate(g.first) : '—');
+    add('最後の訪問', fmtDate(g.last) + (g.online ? '(滞在中)' : ''));
+    add('この期間', `訪問 ${g.count}回 / 滞在 ${fmtDur(g.total)} / コメント ${g.comments}件`);
+    box.append(dl);
+    for (const it of g.members || []) {
+      const card = el('div', 'dcard');
+      card.append(el('div', 'dcard-h', `${it.browser || 'ブラウザ'}${it.muted ? '(ミュート中)' : ''}`));
+      const d2 = el('dl', 'dl');
+      const add2 = (k, v, mono) => { d2.append(el('dt', '', k)); d2.append(el('dd', mono ? 'mono' : '', v)); };
+      add2('ブラウザID', it.device, true);
+      add2('名前の履歴', (it.names_hist || []).join(', ') || '—');
+      add2('IPの履歴', (it.ips_hist || []).join(', ') || '—', true);
+      add2('最初', it.first ? fmtDate(it.first) : '—');
+      add2('最後', it.last ? fmtDate(it.last) : '—');
+      add2('ブラウザ情報', it.ua || '—', true);
+      card.append(d2);
+      box.append(card);
+    }
+    box.append(el('p', 'muted note', '※MACアドレス・端末名はブラウザから取得できないため表示できません。'));
+    $('detailModal').hidden = false;
+  }
+
   async function loadHistory() {
     hSyncInputs();
     const [from, to] = hRange();
@@ -1121,7 +1155,7 @@
       if (!groups.length) { body.append(el('p', 'muted', 'この期間の訪問はありません')); return; }
       const t = el('table', 'htable');
       const head = el('tr');
-      for (const h of ['名前', '端末', '訪問回数', '滞在合計', 'コメント', '最後の訪問']) head.append(el('th', '', h));
+      for (const h of ['名前', '端末', '訪問回数', '滞在合計', 'コメント', '最後の訪問', '']) head.append(el('th', '', h));
       t.append(el('thead')); t.tHead.append(head);
       const tb = el('tbody'); t.append(tb);
       for (const g of groups) {
@@ -1130,6 +1164,9 @@
         if (g.online) last.append(el('span', 'live-dot', ' ●滞在中'));
         tr.append(el('td', 'wrap', g.names.join(', ') || '—'), el('td', 'wrap', g.labels.join(', ') || '—'),
           el('td', '', g.count + '回'), el('td', '', fmtDur(g.total)), el('td', '', g.comments + '件'), last);
+        const db = el('button', 'c-mute', '詳細');
+        db.addEventListener('click', (e) => { e.stopPropagation(); openHistDetail(g); });
+        const tdb = el('td'); tdb.append(db); tr.append(tdb);
         tr.addEventListener('click', () => { hDevice = g.root; loadHistory(); });
         tb.append(tr);
       }
@@ -1145,6 +1182,9 @@
     $('histSum').append(el('b', '', g.names.join(', ') || '名前なし'), document.createTextNode(`  ${g.labels.join(', ')}  端末番号 ${g.key}  ／  訪問 `),
       el('b', '', g.count + '回'), document.createTextNode(' / 滞在合計 '), el('b', '', fmtDur(g.total)),
       document.createTextNode(' / コメント '), el('b', '', g.comments + '件'));
+    const db = el('button', 'c-mute', '端末の詳細');
+    db.addEventListener('click', () => openHistDetail(g));
+    $('histSum').append(document.createTextNode('  '), db);
     const t = el('table', 'htable');
     const head = el('tr');
     for (const h of ['入室', '退室', '滞在時間', 'コメント', 'ブラウザ']) head.append(el('th', '', h));
