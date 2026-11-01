@@ -149,7 +149,7 @@
   }
 
   // ---- 音声(自動再生はミュート必須なので、タップ時に音を出す) ----
-  let soundOn = store.get(KEY_SOUND) !== 'off';
+  let soundOn = store.get(KEY_SOUND) === 'on'; // 初期状態は音なし。🔊や音量スライダーで音ありに
   function drawSound() { $('sound').textContent = soundOn ? '🔊 音あり' : '🔇 音なし'; }
   let userTapped = false;
   function applySound() { userTapped = true; video.muted = !soundOn; drawSound(); }
