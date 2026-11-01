@@ -39,11 +39,6 @@
   .row3 button { padding: 14px 6px; font-size: 14px; }
   button:active, .btn:active { transform: scale(.98); }
   .msg { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--sub); text-align: center; }
-  details { margin-top: 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 4px 14px; }
-  summary { padding: 10px 0; font-size: 14px; font-weight: 600; cursor: pointer; }
-  label { display: block; font-size: 12px; color: var(--sub); margin: 10px 0 4px; }
-  input { width: 100%; padding: 11px; border-radius: 10px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--text); font-size: 14px; }
   .hint { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 8px 0 12px; }
   .hint b { color: var(--text); }
 </style>
@@ -70,29 +65,16 @@
   </div>
   <div id="msg" class="msg"></div>
 
-  <details>
-    <summary>設定</summary>
-    <label for="srcInput">映像の接続先(OBSのQRから開くと自動で入ります)</label>
-    <input id="srcInput" type="url" placeholder="https://xxxx.trycloudflare.com/live/index.m3u8" autocomplete="off">
-    <label for="retInput">REALITYの戻り先URL(空欄なら標準)</label>
-    <input id="retInput" type="url" placeholder="https://reality.app/" autocomplete="off">
-    <p class="hint">戻るボタンでREALITYが開かない場合は、REALITYアプリの「プロフィールをシェア」で出るURLをここに貼ってください。</p>
-    <button id="save" class="secondary" style="width:100%">保存して再接続</button>
-    <p class="hint">
-      <b>iPhone:</b> Safariで開いてください(ホーム画面に追加したアプリ版や、LINEなどの中のブラウザではミニプレイヤーが使えません)。<br>
-      <b>Android:</b> Chromeで開いてください。設定 → アプリ → Chrome → 「ピクチャー イン ピクチャー」を許可。<br>
-      音は最初ミュートで始まり、ボタンをタップすると出ます(🔊ボタンで切替)。音量はOBS側で調整してください。遅延は1〜3秒くらいです。<br>
-      <b>iPhoneでREALITYに戻るとミニプレイヤーが止まる場合</b>は、🔇(音なし)にすると止まりにくくなります。
-    </p>
-  </details>
 </div>
 
+<script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"></script>
 <script>
 (() => {
-  const REALITY_PACKAGE = 'net.wrightflyer.le.reality';
-  const DEFAULT_RETURN = 'https://reality.app/';
-  const KEY_SRC = 'yobs.src', KEY_RET = 'yobs.ret', KEY_SOUND = 'yobs.sound';
+  const CONFIG = window.YOBS_CONFIG || {};
+  const REALITY_PACKAGE = CONFIG.realityPackage || 'net.wrightflyer.le.reality';
+  const RETURN_URL = CONFIG.returnUrl || 'https://reality.app/';
+  const KEY_SRC = 'yobs.src', KEY_SOUND = 'yobs.sound';
 
   const $ = (id) => document.getElementById(id);
   const video = $('video'), overlay = $('overlay'), msg = $('msg');
@@ -107,12 +89,13 @@
   };
 
   const params = new URLSearchParams(location.search);
-  if (params.get('src')) store.set(KEY_SRC, params.get('src').trim());
-  if (params.get('ret')) store.set(KEY_RET, params.get('ret').trim());
+  if (params.get('src')) {
+    store.set(KEY_SRC, params.get('src').trim());
+    // 接続先をアドレスバーに残さない
+    history.replaceState(null, '', location.pathname);
+  }
 
   let src = store.get(KEY_SRC);
-  $('srcInput').value = src;
-  $('retInput').value = store.get(KEY_RET);
 
   // ---- 音声(自動再生はミュート必須なので、タップ時に音を出す) ----
   let soundOn = store.get(KEY_SOUND) !== 'off';
@@ -214,7 +197,7 @@
 
   // ---- REALITYへ戻る ----
   function returnUrl() {
-    const custom = store.get(KEY_RET) || DEFAULT_RETURN;
+    const custom = RETURN_URL;
     if (isAndroid) {
       // https のリンクを REALITY アプリ指定で開く(未インストール時はリンク先へ)
       try {
@@ -281,14 +264,6 @@
   });
 
   $('reload').addEventListener('click', () => { say(''); startPlayer(); applySound(); });
-
-  $('save').addEventListener('click', () => {
-    src = $('srcInput').value.trim();
-    store.set(KEY_SRC, src);
-    store.set(KEY_RET, $('retInput').value.trim());
-    say('保存しました');
-    startPlayer();
-  });
 
   // 画面に戻ってきたら止まっていないか確認
   document.addEventListener('visibilitychange', () => {
