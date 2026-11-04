@@ -81,6 +81,52 @@ def save_json(name, data):
 bans = load_json("bans.json", {"devices": {}, "ips": {}})
 names = load_json("names.json", {})      # device -> {name, ip, ua, label, updated}
 
+# Y++ public text profile. Kept separately from streaming data.
+profile_record = load_json("yplus_profile.json", {"revision": 0, "profile": None})
+PROFILE_ORIGINS = set(filter(None, (x.strip() for x in os.environ.get(
+    "YOBS_PROFILE_ORIGINS", "https://y-tools.github.io"
+).split(","))))
+
+def normalize_profile(value):
+    """Accept only plain text and a bounded set of editable blocks."""
+    if not isinstance(value, dict):
+        raise ValueError("プロフィールの形式が不正です")
+    def limited(value, length, field):
+        if not isinstance(value, str) or len(value) > length:
+            raise ValueError(field + "が長すぎるか不正です")
+        return value
+    blocks = value.get("blocks", [])
+    if not isinstance(blocks, list) or len(blocks) > 24:
+        raise ValueError("ブロックは最大24個です")
+    cleaned = []
+    ids = set()
+    for block in blocks:
+        if not isinstance(block, dict):
+            raise ValueError("ブロックが不正です")
+        ident = limited(block.get("id", ""), 80, "識別子")
+        if not ident or not all(c.isascii() and (c.isalnum() or c in "-_") for c in ident) or ident in ids:
+            raise ValueError("ブロック識別子が不正です")
+        ids.add(ident)
+        kind = block.get("type")
+        if kind not in ("weekly", "basic"):
+            raise ValueError("ブロックの種類が不正です")
+        cleaned.append({
+            "id": ident,
+            "type": kind,
+            "title": limited(block.get("title", ""), 80, "タイトル"),
+            "content": limited(block.get("content", ""), 1800, "本文"),
+        })
+    return {
+        "displayName": limited(value.get("displayName", ""), 70, "表示名"),
+        "handle": limited(value.get("handle", ""), 100, "補助表示"),
+        "statement": limited(value.get("statement", ""), 160, "キャッチコピー"),
+        "description": limited(value.get("description", ""), 1000, "紹介文"),
+        # Links are kept from the previously published record, not user-controlled here.
+        "links": profile_record.get("profile", {}).get("links", []) if isinstance(profile_record.get("profile"), dict) else [],
+        "blocks": cleaned,
+    }
+
+
 
 def load_comments():
     out = []
@@ -578,6 +624,12 @@ class Handler(BaseHTTPRequestHandler):
         p = urlsplit(self.path).path.rstrip("/")
         if p in ("/count", ""):
             return self.send_json(200, count_snapshot())
+        if p == "/api/profile":
+            with lock:
+                return self.send_json(200, {
+                    "profile": profile_record.get("profile"),
+                    "revision": profile_record.get("revision", 0)
+                })
         if p.startswith("/api/admin/") and p != "/api/admin/state":
             q = parse_qs(urlsplit(self.path).query)
             arg = lambda k, dflt="": (q.get(k) or [dflt])[0]
@@ -751,6 +803,36 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json(403, {"error": "3回間違えたため、アクセスを禁止しました"})
                 left = FAIL_LIMIT - max(n_dev, n_ip)
                 return self.send_json(401, {"error": f"番号が違います(あと{left}回間違えると禁止されます)"})
+
+        if p == "/api/admin/profile":
+            # Cross-origin profile writes are limited to the Y++ site.
+            # Other applications may still use their original Y-OBS endpoints.
+            origin = self.headers.get("Origin", "")
+            if origin not in PROFILE_ORIGINS:
+                return self.send_json(403, {"error": "許可されていないサイトからの更新です"})
+            with lock:
+                if not valid_token(self.token()):
+                    return self.send_json(401, {"error": "ログインしてください"})
+                if not isinstance(d, dict):
+                    return self.send_json(400, {"error": "送信データが不正です"})
+                rev = d.get("revision")
+                if type(rev) is not int or rev != profile_record.get("revision", 0):
+                    return self.send_json(409, {"error": "別の端末で更新されています"})
+                try:
+                    profile = normalize_profile(d.get("profile"))
+                except ValueError as e:
+                    return self.send_json(400, {"error": str(e)})
+                serialized = json.dumps(profile, ensure_ascii=False)
+                if len(serialized.encode("utf-8")) > 17000:
+                    return self.send_json(413, {"error": "プロフィールの容量が大きすぎます"})
+                next_rev = rev + 1
+                next_record = {"revision": next_rev, "profile": profile}
+                try:
+                    save_json("yplus_profile.json", next_record)
+                except OSError:
+                    return self.send_json(500, {"error": "保存に失敗しました"})
+                profile_record.update(next_record)
+            return self.send_json(200, {"ok": True, "revision": next_rev})
 
         if p == "/api/admin/title":
             with lock:
