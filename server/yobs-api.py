@@ -87,6 +87,23 @@ PROFILE_ORIGINS = set(filter(None, (x.strip() for x in os.environ.get(
     "YOBS_PROFILE_ORIGINS", "https://y-tools.github.io"
 ).split(","))))
 
+def validate_profile_links(value):
+    if not isinstance(value, list) or len(value) > 10:
+        raise ValueError("プロフィールリンクが不正です")
+    out = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError("プロフィールリンクが不正です")
+        label = item.get("label")
+        href = item.get("href")
+        if not isinstance(label, str) or not isinstance(href, str):
+            raise ValueError("プロフィールリンクが不正です")
+        if len(label) > 40 or len(href) > 500 or not href.startswith("https://"):
+            raise ValueError("プロフィールリンクが不正です")
+        out.append({"label": label, "href": href})
+    return out
+
+
 def normalize_profile(value):
     """Accept only plain text and a bounded set of editable blocks."""
     if not isinstance(value, dict):
@@ -121,8 +138,7 @@ def normalize_profile(value):
         "handle": limited(value.get("handle", ""), 100, "補助表示"),
         "statement": limited(value.get("statement", ""), 160, "キャッチコピー"),
         "description": limited(value.get("description", ""), 1000, "紹介文"),
-        # Links are kept from the previously published record, not user-controlled here.
-        "links": profile_record.get("profile", {}).get("links", []) if isinstance(profile_record.get("profile"), dict) else [],
+        "links": validate_profile_links(value.get("links", [])),
         "blocks": cleaned,
     }
 
