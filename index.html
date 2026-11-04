@@ -9,7 +9,7 @@
 <meta http-equiv="Expires" content="0">
 <script>
   // 開くたびに最新版か確認し、古いキャッシュなら最新版に切り替える
-  window.YOBS_VERSION = '20261102055144';
+  window.YOBS_VERSION = '20261104-ypp-title';
   fetch('version.json?t=' + Date.now(), { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (d) {
@@ -21,7 +21,7 @@
     })
     .catch(function () {});
 </script>
-<title>Y-OBS</title>
+<title>Y++</title>
 <style>
   :root {
     --bg: #14111c; --panel: #1f1a2b; --line: #352d47; --text: #f3eefc; --sub: #a99cc4;
@@ -270,7 +270,7 @@
 <div class="layout">
 <div class="wrap">
   <header>
-    <h1>Y-OBS</h1>
+    <h1>Y++</h1>
     <div class="pills">
       <span id="viewers" class="pill" hidden>👀 <span id="viewersText">0</span>人</span>
       <span id="status" class="pill"><span class="dot"></span><span id="statusText">準備中</span></span>
